@@ -36,7 +36,13 @@ Every movement, heat, and combat value can be changed live, and changes are save
 
 ## Art direction
 
-Retro boomer shooter set in old downtown Seoul at night: apartment towers ring the arena, shop buildings carry neon Hangul signs, rooftops have the green waterproof paint, utility poles are tangled with power lines, and the middle of the arena is a construction pit. Textures are low-res and drawn procedurally with nearest-neighbour filtering. Enemies use toon shading with thick black outlines in loud colours so they stand out against the muted city.
+A retro boomer shooter played across the rooftops of downtown Seoul at night. The arena is a grid of rooftops at different heights over a street 41 m below. You can sprint-jump the gaps, and you need recoil to climb to the higher roofs. Falling into the street costs 20 HP and drops you back on the last roof you stood on.
+
+- A central skyscraper covered in LED ads that's too tall to climb. Fly around it to break line of sight.
+- Glass towers with rooftop gardens and HVAC units, apartment blocks with helipad roofs, and older shop buildings with neon Hangul signs.
+- Skybridges across some gaps, rooftop billboards (snipers like to perch on them), and a construction crane whose arm is the highest perch on the map.
+- Rooftop huts, water tanks, and AC units to use as cover. Down in the street there's traffic, crosswalks, and lit storefronts.
+- Textures are low-res and drawn procedurally with nearest-neighbour filtering. Enemies use toon shading with black outlines in loud colours.
 
 Rendering cost is kept low for the Quest browser: level boxes are merged into one mesh per material, all signs share one texture atlas and one mesh, and each enemy is drawn in 3 draw calls.
 
