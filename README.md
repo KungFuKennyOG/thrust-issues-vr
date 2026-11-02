@@ -33,3 +33,11 @@ The wrist HUD (VR) and the bottom-right HUD (desktop) show speed, HP, kills, FPS
 ## Tuning
 
 Every movement, heat, and combat value can be changed live, and changes are saved per browser. "Reset defaults" restores the tuned values.
+
+## Art direction
+
+Retro boomer shooter set in old downtown Seoul at night: apartment towers ring the arena, shop buildings carry neon Hangul signs, rooftops have the green waterproof paint, utility poles are tangled with power lines, and the middle of the arena is a construction pit. Textures are low-res and drawn procedurally with nearest-neighbour filtering. Enemies use toon shading with thick black outlines in loud colours so they stand out against the muted city.
+
+Rendering cost is kept low for the Quest browser: level boxes are merged into one mesh per material, all signs share one texture atlas and one mesh, and each enemy is drawn in 3 draw calls.
+
+Font: [Black Han Sans](https://fonts.google.com/specimen/Black+Han+Sans), SIL Open Font License (see `fonts/OFL.txt`).
