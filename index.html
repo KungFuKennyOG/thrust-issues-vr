@@ -16,7 +16,7 @@
   #reset { margin-top: 8px; background: #222; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 6px 10px; }
   #cross { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%;
            background: #fff; box-shadow: 0 0 0 6px rgba(255,255,255,.15); pointer-events: none; display: none; }
-  #dhud { position: fixed; right: 16px; bottom: 16px; width: 220px; font: bold 14px monospace; pointer-events: none; display: none; }
+  #dhud { position: fixed; right: 16px; bottom: 16px; width: 250px; font: bold 14px monospace; pointer-events: none; display: none; }
   #dhud .bar { height: 8px; background: #222; border: 1px solid #444; margin-top: 6px; }
   #dhud .bar i { display: block; height: 100%; width: 0; background: #3f6; }
   #dhud .hp i { background: #e33; }
@@ -34,7 +34,7 @@
      hold Q/E to charge left/right, release to blast · hold Shift = thruster stance (arms point down-back) · Space jump · R reset.<br>
      <b>VR:</b> trigger = machine gun · hold grip to charge, release to blast · left stick move · right stick turn ·
      A jump · X reset · hold Y to tune (right stick ↑↓ select, ←→ change).<br>
-     Recoil pushes you opposite the barrel. Kills cool both arms and heal 5 HP. Grunts telegraph shots with a bright eye — keep moving.</p>
+     Recoil pushes you opposite the barrel. Survive the waves: kills cool both arms and heal 5 HP; airborne kills, multi-kill blasts and long hang time score extra. Grunts flash before shooting · snipers paint you with a laser, then lock (white) and fire — move off the line · heavies shrug off bullets (use charge blasts) and slam the ground (be in the air).</p>
   <div id="sliders"></div>
   <button id="reset">Reset defaults</button>
 </div>
@@ -60,7 +60,7 @@ const DEFAULTS = {
   airControl: 8,       // m/s² from left stick in air
   walkSpeed: 9,
   maxSpeed: 35,
-  heatPerShot: 0.018,  // 1.0 = overheated
+  heatPerShot: 0.013,  // 1.0 = overheated
   coolRate: 0.45,      // heat/s when not firing
   groundCoolMult: 2.0,
   ventThreshold: 0.35, // overheat unlocks below this
@@ -100,9 +100,9 @@ const DEFS = [
   ['groundKick', 'Ground horiz. recoil ×', 0, 1, 0.05],
 ];
 const P = { ...DEFAULTS };
-try { const s = JSON.parse(localStorage.getItem('recoilParams_v2') || 'null'); if (s) Object.assign(P, s); } catch (e) {}
+try { const s = JSON.parse(localStorage.getItem('recoilParams_v3') || 'null'); if (s) Object.assign(P, s); } catch (e) {}
 const decimals = step => (String(step).split('.')[1] || '').length;
-function saveP() { try { localStorage.setItem('recoilParams_v2', JSON.stringify(P)); } catch (e) {} }
+function saveP() { try { localStorage.setItem('recoilParams_v3', JSON.stringify(P)); } catch (e) {} }
 
 // 2D slider panel (visible in the browser before entering VR)
 const sliderEls = {};
@@ -403,21 +403,22 @@ function drawPanel() {
   panel.tex.needsUpdate = true;
   panelDirty = false;
 }
-const hud = makeLabel(256, 136, 0.1, 0.053);
+const hud = makeLabel(256, 176, 0.1, 0.06875);
 hud.mesh.position.set(0, 0.09, 0.15);
 hud.mesh.rotation.x = -0.4;
 arms.right.model.group.add(hud.mesh);
 let hudT = 0;
 function drawHud() {
   const g = hud.ctx;
-  g.clearRect(0, 0, 256, 136);
-  g.fillStyle = 'rgba(0,0,0,0.75)'; g.fillRect(0, 0, 256, 136);
+  g.clearRect(0, 0, 256, 176);
+  g.fillStyle = 'rgba(0,0,0,0.75)'; g.fillRect(0, 0, 256, 176);
   g.fillStyle = '#7fffb0'; g.font = 'bold 40px monospace';
   g.fillText(vel.length().toFixed(1) + ' m/s', 10, 44);
   g.fillStyle = hp < 35 ? '#ff5555' : '#fff'; g.font = '28px monospace';
-  g.fillText(`HP:${Math.ceil(hp)}  K:${kills}`, 10, 84);
+  g.fillText(`HP:${Math.ceil(hp)}  W:${game.wave}`, 10, 84);
+  g.fillStyle = '#ffd24a'; g.fillText(`${game.score}`, 10, 122);
   g.fillStyle = perfColor(); g.font = 'bold 26px monospace';
-  g.fillText(perfText(), 10, 122);
+  g.fillText(perfText(), 10, 160);
   hud.tex.needsUpdate = true;
 }
 // ---------- Perf readout: avg FPS + worst frame over the last 0.5 s ----------
@@ -433,7 +434,8 @@ const perfColor = () => perf.fps >= 68 && perf.worstShown < 25 ? '#5f5' : perf.f
 const dSpd = document.getElementById('spd'), dHp = document.getElementById('hpb');
 const dHeat = { left: document.getElementById('hl'), right: document.getElementById('hr') };
 function updateDeskHud() {
-  dSpd.innerHTML = `${vel.length().toFixed(1)} m/s · K:${kills} · ${grounded ? 'GROUND' : 'AIR'}<br>`
+  dSpd.innerHTML = `<span style="color:#ffd24a">W${game.wave} · ${game.score} pts</span> · best ${game.best.score}<br>`
+    + `${vel.length().toFixed(1)} m/s · ${grounded ? 'GROUND' : 'AIR ' + game.airT.toFixed(1) + 's'}<br>`
     + `<span style="color:${perfColor()}">${perfText()}</span>`;
   dHp.style.width = Math.max(0, hp) + '%';
   for (const hand of ['left', 'right']) {
@@ -448,6 +450,47 @@ const hurtPlane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2),
 hurtPlane.position.z = -0.12;
 hurtPlane.renderOrder = 999;
 camera.add(hurtPlane);
+
+// Wave banner + score feed, parented to the camera (works on desktop and in the headset)
+function camLabel(pxW, pxH, mW, mH, y) {
+  const l = makeLabel(pxW, pxH, mW, mH);
+  l.mesh.material.depthTest = false; l.mesh.material.depthWrite = false;
+  l.mesh.renderOrder = 1000; l.mesh.position.set(0, y, -1.5); l.mesh.visible = false;
+  camera.add(l.mesh);
+  return l;
+}
+const bannerL = camLabel(1024, 256, 1.2, 0.3, 0.3);
+const feedL = camLabel(512, 160, 0.5, 0.156, -0.17);
+let bannerT = 0;
+function banner(title, sub = '', dur = 3) {
+  const g = bannerL.ctx;
+  g.clearRect(0, 0, 1024, 256);
+  g.textAlign = 'center'; g.lineJoin = 'round'; g.lineWidth = 12; g.strokeStyle = 'rgba(0,0,0,0.85)';
+  g.font = 'bold 104px monospace'; g.strokeText(title, 512, 125); g.fillStyle = '#ffd24a'; g.fillText(title, 512, 125);
+  if (sub) { g.font = 'bold 40px monospace'; g.lineWidth = 8; g.strokeText(sub, 512, 200); g.fillStyle = '#fff'; g.fillText(sub, 512, 200); }
+  bannerL.tex.needsUpdate = true;
+  bannerT = dur;
+}
+let feedRedraw = 0;
+function updateBanner(dt) {
+  bannerT -= dt;
+  bannerL.mesh.visible = bannerT > 0;
+  bannerL.mesh.material.opacity = Math.min(1, bannerT / 0.4);
+  for (let i = feed.length - 1; i >= 0; i--) if ((feed[i].t -= dt) <= 0) { feed.splice(i, 1); feedDirty = true; }
+  feedL.mesh.visible = feed.length > 0;
+  if (feed.length && (feedDirty || (feedRedraw -= dt) <= 0)) {
+    const g = feedL.ctx;
+    g.clearRect(0, 0, 512, 160);
+    g.textAlign = 'center'; g.font = 'bold 40px monospace'; g.lineJoin = 'round'; g.lineWidth = 8; g.strokeStyle = 'rgba(0,0,0,0.8)';
+    feed.forEach((f, i) => {
+      g.globalAlpha = Math.min(1, f.t / 0.5);
+      g.strokeText(f.text, 256, 44 + i * 50);
+      g.fillStyle = i === 0 ? '#ffd24a' : '#e8e0c0'; g.fillText(f.text, 256, 44 + i * 50);
+    });
+    g.globalAlpha = 1;
+    feedL.tex.needsUpdate = true; feedDirty = false; feedRedraw = 1 / 15;
+  }
+}
 
 // ---------- FX: tracers, sparks, explosions ----------
 const MAXT = 200, TL = 0.07;
@@ -497,8 +540,25 @@ function spawnBoom(p, r) {
   const b = booms[boomIdx++ % booms.length];
   b.m.position.copy(p); b.m.visible = true; b.t = 0; b.r = r;
 }
+const rings = [];
+const ringGeo = new THREE.RingGeometry(0.8, 1, 48).rotateX(-Math.PI / 2);
+for (let i = 0; i < 4; i++) {
+  const m = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xff7a1a, blending: THREE.AdditiveBlending,
+    transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+  m.visible = false; scene.add(m); rings.push({ m, t: 0, r: 1 });
+}
+let ringIdx = 0;
+function spawnRing(p, r) {
+  const g = rings[ringIdx++ % rings.length];
+  g.m.position.copy(p); g.m.visible = true; g.t = 0; g.r = r;
+}
 function updateFx(dt) {
   updateTracers(dt);
+  for (const g of rings) if (g.m.visible) {
+    g.t += dt; const k = g.t / 0.4;
+    if (k >= 1) { g.m.visible = false; continue; }
+    g.m.scale.setScalar(Math.max(0.01, g.r * k)); g.m.material.opacity = 1 - k * k;
+  }
   for (const s of sparks) if (s.m.visible && (s.life -= dt) <= 0) s.m.visible = false;
   for (const b of booms) if (b.m.visible) {
     b.t += dt; const k = b.t / b.life;
@@ -639,19 +699,27 @@ function hurt(n, from) {
   if (hp <= 0) die();
 }
 function die() {
-  best = Math.max(best, kills);
   sfxTone('sawtooth', 300, 40, 0.25, 0.8);
-  for (const e of enemies) scene.remove(e.mesh);
+  const newBest = game.score > game.best.score;
+  if (newBest) {
+    game.best = { score: game.score, wave: game.wave };
+    try { localStorage.setItem('thrustBest', JSON.stringify(game.best)); } catch (e) {}
+  }
+  banner('YOU DIED', `wave ${game.wave} · ${game.score} pts` + (newBest ? ' · NEW BEST' : ` · best ${game.best.score}`), 4.5);
+  for (const e of enemies) removeEnemy(e);
   enemies.length = 0;
   for (const p of projectiles) { p.active = false; p.m.visible = false; }
-  kills = 0; hp = 100; spawnT = 2; hurtFlash = 1;
+  kills = 0; hp = 100; hurtFlash = 1;
+  game.score = 0; game.wave = 0; game.state = 'breather'; game.t = 5; game.airT = 0; game.queue = [];
+  feed.length = 0; feedDirty = true;
   for (const a of Object.values(arms)) { a.heat = 0; a.overheated = false; a.charge = 0; }
   respawn();
 }
 
 // ---------- Enemies ----------
 const enemies = [];
-const _ed = new THREE.Vector3(), _ec = new THREE.Vector3();
+const _ed = new THREE.Vector3(), _ec = new THREE.Vector3(), _ea = new THREE.Vector3(), _eb = new THREE.Vector3(),
+      _ef = new THREE.Vector3(), _eg = new THREE.Vector3();
 const GEO = {
   legs: new THREE.BoxGeometry(0.6, 0.5, 0.4).translate(0, 0.25, 0),
   torso: new THREE.BoxGeometry(0.9, 0.9, 0.55).translate(0, 0.95, 0),
@@ -660,6 +728,23 @@ const GEO = {
   orb: new THREE.IcosahedronGeometry(0.45, 0).translate(0, 0.5, 0),
   spike: new THREE.ConeGeometry(0.12, 0.45, 5),
   eye: new THREE.SphereGeometry(0.12, 10, 8).translate(0, 0.5, 0.4),
+  hLegs: new THREE.BoxGeometry(1.1, 1.0, 0.8).translate(0, 0.5, 0),
+  hTorso: new THREE.BoxGeometry(1.8, 1.4, 1.1).translate(0, 1.7, 0),
+  hHead: new THREE.BoxGeometry(0.7, 0.5, 0.6).translate(0, 2.65, 0.1),
+  hVisor: new THREE.BoxGeometry(0.5, 0.1, 0.04).translate(0, 2.68, 0.42),
+  hPlate: new THREE.BoxGeometry(0.6, 0.9, 1.25),
+  hFist: new THREE.BoxGeometry(0.55, 0.65, 0.55),
+  sBody: new THREE.CylinderGeometry(0.3, 0.45, 1.3, 6).translate(0, 0.65, 0),
+  sHead: new THREE.OctahedronGeometry(0.32, 0).translate(0, 1.6, 0),
+  sBarrel: new THREE.CylinderGeometry(0.05, 0.05, 1.4, 6).rotateX(Math.PI / 2).translate(0, 1.45, 0.75),
+  sEye: new THREE.SphereGeometry(0.1, 8, 6).translate(0, 1.62, 0.28),
+  beam: new THREE.BoxGeometry(1, 1, 1).translate(0, 0, 0.5),
+};
+const STATS = {
+  grunt:  { hp: 8,  r: 0.45, h: 1.9, cy: 1.1, pts: 150, color: 0x8a1f2a, em: 0x501010, glow: 0xffcc33 },
+  flyer:  { hp: 4,  r: 0.5,  h: 1.0, cy: 0.5, pts: 100, color: 0xd2402a, em: 0x501010, glow: 0x66ffee },
+  heavy:  { hp: 40, r: 0.9,  h: 3.0, cy: 1.6, pts: 500, color: 0x70747e, em: 0x1a1a22, glow: 0xff7a1a },
+  sniper: { hp: 5,  r: 0.45, h: 1.9, cy: 1.2, pts: 300, color: 0x7a2a8a, em: 0x30103a, glow: 0xff2a6a },
 };
 function addPart(e, geo, mat) {
   const m = new THREE.Mesh(geo, mat);
@@ -668,25 +753,37 @@ function addPart(e, geo, mat) {
   return m;
 }
 function makeEnemy(type, p) {
+  const S = STATS[type];
   const e = { type, mesh: new THREE.Group(), pos: p.clone(), vel: new THREE.Vector3(), alive: true, dying: -1, born: 0,
-              flash: 0, cd: 1 + Math.random() * 1.5, wind: 0, strafe: Math.random() < 0.5 ? -1 : 1, strafeT: 2,
-              grounded: false, mats: [] };
-  const body = new THREE.MeshStandardMaterial({ color: type === 'grunt' ? 0x8a1f2a : 0xd2402a, emissive: 0x200000,
-                                                flatShading: true, transparent: true });
-  body.emissive.setHex(0x501010);
-  const glow = new THREE.MeshBasicMaterial({ color: type === 'grunt' ? 0xffcc33 : 0x66ffee, transparent: true });
+              flash: 0, ping: 0, cd: 1 + Math.random() * 1.5, wind: 0, aim: 0, lock: new THREE.Vector3(),
+              strafe: Math.random() < 0.5 ? -1 : 1, strafeT: 2, grounded: false, mats: [], extras: [],
+              hp: S.hp, r: S.r, h: S.h, cy: S.cy };
+  const body = new THREE.MeshStandardMaterial({ color: S.color, emissive: S.em, flatShading: true, transparent: true,
+                                                metalness: type === 'heavy' ? 0.6 : 0, roughness: type === 'heavy' ? 0.35 : 1 });
+  const glow = new THREE.MeshBasicMaterial({ color: S.glow, transparent: true });
   e.mats.push(body, glow); e.body = body; e.glow = glow;
   if (type === 'grunt') {
-    e.hp = 8; e.r = 0.45; e.h = 1.9; e.cy = 1.1;
     addPart(e, GEO.legs, body); addPart(e, GEO.torso, body); addPart(e, GEO.head, body); addPart(e, GEO.visor, glow);
-  } else {
-    e.hp = 4; e.r = 0.5; e.h = 1.0; e.cy = 0.5;
+  } else if (type === 'flyer') {
     addPart(e, GEO.orb, body); addPart(e, GEO.eye, glow);
     for (const [x, y, z, rx, rz] of [[0.55, 0.5, 0, 0, -Math.PI / 2], [-0.55, 0.5, 0, 0, Math.PI / 2],
                                      [0, 1.05, 0, 0, 0], [0, -0.05, 0, Math.PI, 0]]) {
       const s = addPart(e, GEO.spike, body); // cones point +Y by default
       s.position.set(x, y, z); s.rotation.set(rx, 0, rz);
     }
+  } else if (type === 'heavy') {
+    addPart(e, GEO.hLegs, body); addPart(e, GEO.hTorso, body); addPart(e, GEO.hHead, body); addPart(e, GEO.hVisor, glow);
+    for (const sx of [-1, 1]) {
+      addPart(e, GEO.hPlate, body).position.set(sx * 1.15, 2.15, 0);
+      addPart(e, GEO.hFist, body).position.set(sx * 1.1, 1.05, 0.15);
+    }
+  } else { // sniper
+    addPart(e, GEO.sBody, body); addPart(e, GEO.sHead, body); addPart(e, GEO.sBarrel, body); addPart(e, GEO.sEye, glow);
+    const lm = new THREE.MeshBasicMaterial({ color: 0xff2a6a, transparent: true, opacity: 0.55,
+                                             blending: THREE.AdditiveBlending, depthWrite: false });
+    e.laser = new THREE.Mesh(GEO.beam, lm);
+    e.laser.visible = false;
+    scene.add(e.laser); e.extras.push(e.laser);
   }
   e.mesh.position.copy(e.pos);
   e.mesh.scale.setScalar(0.01);
@@ -694,44 +791,118 @@ function makeEnemy(type, p) {
   enemies.push(e);
   return e;
 }
-const center = e => _ec.set(e.pos.x, e.pos.y + e.cy, e.pos.z);
-function spawnGrunt() {
-  const mid = GRUNT_SPAWNS.filter(s => { const d = s.distanceTo(pos); return d > 20 && d < 45; });
-  const far = GRUNT_SPAWNS.filter(s => s.distanceTo(pos) > 20);
-  const list = mid.length ? mid : far.length ? far : GRUNT_SPAWNS;
-  makeEnemy('grunt', list[Math.floor(Math.random() * list.length)]);
+function removeEnemy(e) {
+  scene.remove(e.mesh);
+  for (const x of e.extras) scene.remove(x);
 }
-function spawnFlyer() {
-  for (let i = 0; i < 30; i++) {
-    const p = new THREE.Vector3((Math.random() * 2 - 1) * 50, 8 + Math.random() * 32, (Math.random() * 2 - 1) * 50);
-    const d = p.distanceTo(pos);
-    if (d > 20 && d < 45 && !hitSolid(p.x, p.y, p.z, 0.6, 1.1)) { makeEnemy('flyer', p); return; }
+const center = e => _ec.set(e.pos.x, e.pos.y + e.cy, e.pos.z);
+function setBeam(m, a, b, thick) {
+  m.position.copy(a); m.lookAt(b); m.scale.set(thick, thick, a.distanceTo(b));
+}
+
+// ---------- Spawning ----------
+const GROUND_SPAWNS = GRUNT_SPAWNS.filter(s => s.y === 0);
+const SNIPER_SPOTS = [
+  [-15, 37, -50], [15, 37, -50], [-15, 37, 50], [15, 37, 50], [50, 37, -15], [50, 37, 15], [-50, 37, -15], [-50, 37, 15],
+  [-25, 24, 25], [25, 18, -25], [0, 30, -30], [0, 22.8, 0], [-52, 49, -52],
+].map(a => new THREE.Vector3(...a));
+function pickSpot(list, min, max) {
+  const free = s => !enemies.some(e => e.alive && e.pos.distanceTo(s) < 2.5);
+  let c = list.filter(s => { const d = s.distanceTo(pos); return d > min && d < max && free(s); });
+  if (!c.length) c = list.filter(s => s.distanceTo(pos) > min && free(s));
+  if (!c.length) c = list;
+  return c[Math.floor(Math.random() * c.length)];
+}
+function spawnEnemy(type) {
+  if (type === 'flyer') {
+    for (let i = 0; i < 30; i++) {
+      const p = new THREE.Vector3((Math.random() * 2 - 1) * 50, 8 + Math.random() * 32, (Math.random() * 2 - 1) * 50);
+      const d = p.distanceTo(pos);
+      if ((d > 20 && d < 45 || i > 25) && d > 12 && !hitSolid(p.x, p.y, p.z, 0.6, 1.1)) { makeEnemy('flyer', p); return; }
+    }
+    makeEnemy('flyer', new THREE.Vector3(0, 40, pos.z > 0 ? -40 : 40));
+  } else if (type === 'sniper') makeEnemy('sniper', pickSpot(SNIPER_SPOTS, 25, 200));
+  else if (type === 'heavy') makeEnemy('heavy', pickSpot(GROUND_SPAWNS, 20, 50));
+  else makeEnemy('grunt', pickSpot(GRUNT_SPAWNS, 20, 45));
+}
+
+// ---------- Waves + score ----------
+const game = { wave: 0, state: 'breather', t: 3, queue: [], spawnT: 0, score: 0, airT: 0, best: { score: 0, wave: 0 } };
+try { const b = JSON.parse(localStorage.getItem('thrustBest') || 'null'); if (b && typeof b.score === 'number') game.best = b; } catch (e) {}
+function waveComp(n) {
+  const q = [];
+  const add = (t, k) => { for (let i = 0; i < k; i++) q.push(t); };
+  add('flyer', 2 + n);
+  add('grunt', 2 + Math.floor(n * 1.2));
+  add('sniper', n >= 2 ? Math.floor(n / 2) : 0);
+  add('heavy', n >= 3 ? Math.floor((n - 1) / 2) : 0);
+  for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [q[i], q[j]] = [q[j], q[i]]; }
+  return q;
+}
+const WAVE_HINT = { 2: 'snipers on the high ledges — watch for lasers', 3: 'heavies shrug off bullets — charge blast them' };
+function startWave(n) {
+  game.wave = n; game.queue = waveComp(n); game.state = 'fight'; game.spawnT = 0;
+  banner(`WAVE ${n}`, WAVE_HINT[n] || '', 3);
+  sfxTone('sawtooth', 110, 220, 0.15, 0.5);
+}
+function updateWaves(dt) {
+  const alive = enemies.filter(e => e.alive).length;
+  if (game.state === 'fight') {
+    const maxC = Math.min(14, 6 + game.wave);
+    if (game.queue.length && alive < maxC && (game.spawnT -= dt) <= 0) { spawnEnemy(game.queue.shift()); game.spawnT = 0.8; }
+    if (!game.queue.length && alive === 0) {
+      const bonus = 500 * game.wave;
+      addScore(bonus, `WAVE ${game.wave} CLEAR`);
+      hp = Math.min(100, hp + 30);
+      game.state = 'breather'; game.t = 6;
+      banner(`WAVE ${game.wave} CLEAR`, `+${bonus} · +30 HP`, 3);
+      sfxTone('square', 440, 880, 0.12, 0.4);
+    }
+  } else {
+    const prev = Math.ceil(game.t);
+    game.t -= dt;
+    const now = Math.ceil(game.t);
+    if (now !== prev && game.t > 0 && now <= 3) banner(`WAVE ${game.wave + 1} IN ${now}`, '', 1.1);
+    if (game.t <= 0) startWave(game.wave + 1);
+  }
+  // hang-time bonus on landing
+  if (!grounded) game.airT += dt;
+  else if (game.airT > 0) {
+    if (game.airT >= 3 && game.state === 'fight') addScore(Math.floor(game.airT) * 50, `HANG ${game.airT.toFixed(1)}s`);
+    game.airT = 0;
   }
 }
-let spawnT = 1.5;
-function updateSpawner(dt) {
-  if ((spawnT -= dt) > 0) return;
-  spawnT = 1.2;
-  let nG = 0, nF = 0;
-  for (const e of enemies) if (e.alive) e.type === 'grunt' ? nG++ : nF++;
-  const maxG = Math.min(10, 3 + Math.floor(kills / 8)), maxF = Math.min(10, 2 + Math.floor(kills / 6));
-  const gNeed = maxG - nG, fNeed = maxF - nF;
-  if (gNeed <= 0 && fNeed <= 0) return;
-  gNeed >= fNeed ? spawnGrunt() : spawnFlyer();
+const feed = [];
+let feedDirty = true;
+function addScore(n, tag) {
+  n = Math.round(n);
+  game.score += n;
+  feed.unshift({ text: `+${n} ${tag}`, t: 2.2 });
+  if (feed.length > 3) feed.length = 3;
+  feedDirty = true;
 }
+
+// ---------- Damage ----------
 const losRay = new THREE.Raycaster();
 function hasLOS(from, to) {
   _ed.subVectors(to, from); const d = _ed.length(); _ed.divideScalar(d);
   losRay.set(from, _ed); losRay.far = d - 0.3;
   return losRay.intersectObjects(levelMeshes, false).length === 0;
 }
-function damage(e, amt, dir) {
+let blastKills = 0;
+function damage(e, amt, dir, kind = 'mg') {
   if (!e.alive) return;
-  e.hp -= amt; e.flash = 0.06;
+  if (e.type === 'heavy' && kind === 'mg') { amt *= 0.1; e.ping = 0.05; } // armor: bullets barely scratch it
+  else e.flash = 0.06;
+  e.hp -= amt;
   if (dir && e.type === 'flyer') e.vel.addScaledVector(dir, 0.8 * amt);
   if (e.hp > 0) return;
   e.alive = false; e.dying = 0;
+  if (e.laser) e.laser.visible = false;
   kills++;
+  const air = !grounded;
+  addScore(STATS[e.type].pts * (air ? 1.5 : 1), (air ? 'AIR ' : '') + e.type.toUpperCase());
+  if (kind === 'blast') blastKills++;
   hp = Math.min(100, hp + 5);
   for (const a of Object.values(arms)) {
     a.heat = Math.max(0, a.heat - P.killCool);
@@ -740,6 +911,42 @@ function damage(e, amt, dir) {
   }
   sfxTone('square', 300, 1200, 0.12, 0.15);
 }
+// Walkers that are trying to move but not getting anywhere: hop first, then walk sideways for a bit.
+function unstick(e, px, pz, tx, tz, dt) {
+  const want = Math.hypot(tx, tz) > 0.5, moved = Math.hypot(e.pos.x - px, e.pos.z - pz) / Math.max(dt, 1e-3);
+  if (want && e.grounded && moved < 0.4) e.stuck = (e.stuck || 0) + dt; else e.stuck = Math.max(0, (e.stuck || 0) - dt);
+  if (e.stuck > 0.5) {
+    e.stuck = 0;
+    if (e.pos.y < -5) e.vel.y = 24; // stuck in the pit: leap out
+    else if ((e.hops = (e.hops || 0) + 1) % 2) e.vel.y = 9;
+    else { e.strafe = -e.strafe; e.detour = 1.5; }
+  }
+}
+// Beacons: when a wave is down to its last few enemies, mark them so they can't hide.
+const beaconGeo = new THREE.CylinderGeometry(0.12, 0.12, 60, 6).translate(0, 30, 0);
+const beaconMat = new THREE.MeshBasicMaterial({ color: 0xff3040, transparent: true, opacity: 0.35,
+                                                blending: THREE.AdditiveBlending, depthWrite: false });
+function updateBeacons() {
+  const show = game.state === 'fight' && !game.queue.length && enemies.filter(e => e.alive).length <= 3;
+  for (const e of enemies) {
+    const on = show && e.alive && e.born >= 1;
+    if (on && !e.beacon) { e.beacon = new THREE.Mesh(beaconGeo, beaconMat); scene.add(e.beacon); e.extras.push(e.beacon); }
+    if (e.beacon) { e.beacon.visible = on; if (on) e.beacon.position.set(e.pos.x, e.pos.y + e.h, e.pos.z); }
+  }
+}
+function slam(e) {
+  e.cd = 3;
+  _ea.set(e.pos.x, e.pos.y + 0.1, e.pos.z);
+  spawnRing(_ea, 9); spawnBoom(_ea, 2);
+  sfxNoise('lowpass', 200, 0.7, 0.6, 0, 0.4);
+  const hd = Math.hypot(pos.x - e.pos.x, pos.z - e.pos.z), up = pos.y - e.pos.y;
+  if (hd < 9 && up < 1.5 && up > -1.5) { // jump or fly to dodge it
+    hurt(25);
+    const k = 1 / (hd || 1);
+    vel.x += (pos.x - e.pos.x) * k * 8; vel.z += (pos.z - e.pos.z) * k * 8; vel.y = Math.max(vel.y, 7);
+  }
+}
+
 function updateEnemies(dt) {
   for (let i = enemies.length - 1; i >= 0; i--) {
     const e = enemies[i];
@@ -748,17 +955,17 @@ function updateEnemies(dt) {
       e.mesh.scale.setScalar(1 + 1.5 * e.dying);
       for (const m of e.mats) m.opacity = Math.max(0, 1 - e.dying);
       e.body.emissive.setHex(0xffaa66);
-      if (e.dying >= 1) { scene.remove(e.mesh); enemies.splice(i, 1); }
+      if (e.dying >= 1) { removeEnemy(e); enemies.splice(i, 1); }
       continue;
     }
     if (e.born < 1) { e.born = Math.min(1, e.born + dt / 0.4); e.mesh.scale.setScalar(Math.max(0.01, e.born)); }
-    e.flash -= dt;
-    e.body.emissive.setHex(e.flash > 0 ? 0xffffff : 0x501010);
+    e.flash -= dt; e.ping -= dt;
+    e.body.emissive.setHex(e.flash > 0 ? 0xffffff : e.ping > 0 ? 0x3355cc : STATS[e.type].em);
     const c = center(e);
     const dx = chest.x - c.x, dy = chest.y - c.y, dz = chest.z - c.z, dist = Math.hypot(dx, dy, dz) || 1;
 
     if (e.type === 'flyer') {
-      const spd = 8 + Math.min(6, kills * 0.15);
+      const spd = 8 + Math.min(6, game.wave * 0.6);
       _ed.set(dx / dist * spd, dy / dist * spd + Math.sin(T * 3 + i) * 1.5, dz / dist * spd);
       for (const o of enemies) { // keep a little spacing
         if (o === e || o.type !== 'flyer' || !o.alive) continue;
@@ -777,34 +984,101 @@ function updateEnemies(dt) {
       }
       e.mesh.rotation.y += dt * 2;
       e.glow.color.setHex(e.cd > 0.6 ? 0xffffff : 0x66ffee);
-    } else {
+
+    } else if (e.type === 'grunt') {
       e.vel.y -= 20 * dt;
       const hd = Math.hypot(dx, dz) || 1, spd = 3.5;
       let tx, tz;
       if ((e.strafeT -= dt) <= 0) { e.strafe = Math.random() < 0.5 ? -1 : 1; e.strafeT = 1.5 + Math.random() * 2; }
       if (hd > 10) { tx = dx / hd * spd; tz = dz / hd * spd; }
       else { tx = -dz / hd * spd * e.strafe; tz = dx / hd * spd * e.strafe; }
+      if (e.detour > 0) { e.detour -= dt; tx = -dz / hd * spd * e.strafe; tz = dx / hd * spd * e.strafe; }
       if (e.wind > 0) { tx = tz = 0; }
       if (e.grounded) { const k = Math.min(1, 8 * dt); e.vel.x += (tx - e.vel.x) * k; e.vel.z += (tz - e.vel.z) * k; }
+      const px = e.pos.x, pz = e.pos.z;
       e.grounded = moveBody(e.pos, e.vel, e.r, e.h, dt);
+      unstick(e, px, pz, tx, tz, dt);
       e.mesh.rotation.y = Math.atan2(dx, dz);
       // shooting: wind-up (bright visor) then fire a dodgeable orb
       if (e.wind > 0) {
         e.wind -= dt;
         e.glow.color.setHex(Math.floor(T * 20) % 2 ? 0xffffff : 0xff3300);
         if (e.wind <= 0) {
-          const from = new THREE.Vector3(e.pos.x, e.pos.y + 1.66, e.pos.z);
-          fireProjectile(from, chest);
+          fireProjectile(_ea.set(e.pos.x, e.pos.y + 1.66, e.pos.z), chest, 20, 10, 1);
           e.cd = 1.4 + Math.random() * 1.6;
         }
       } else {
         e.glow.color.setHex(0xffcc33);
         if (e.born >= 1 && (e.cd -= dt) <= 0) {
-          const from = _h.set(e.pos.x, e.pos.y + 1.66, e.pos.z);
+          const from = _ea.set(e.pos.x, e.pos.y + 1.66, e.pos.z);
           if (dist < 80 && hasLOS(from, chest)) e.wind = 0.4; else e.cd = 0.5;
         }
       }
       if (e.pos.y < -40) e.alive = false, e.dying = 1;
+
+    } else if (e.type === 'heavy') {
+      e.vel.y -= 20 * dt;
+      const hd = Math.hypot(dx, dz) || 1;
+      if (e.wind > 0) { // slam wind-up: crouch + flashing visor
+        e.wind -= dt;
+        const k = 1 - Math.max(0, e.wind) / 0.9;
+        e.mesh.scale.set(1 + 0.12 * k, 1 - 0.2 * k, 1 + 0.12 * k);
+        e.glow.color.setHex(Math.floor(T * 16) % 2 ? 0xffffff : 0xff7a1a);
+        const f = Math.exp(-10 * dt); e.vel.x *= f; e.vel.z *= f;
+        if (e.wind <= 0) { e.mesh.scale.setScalar(1); slam(e); }
+      } else {
+        e.glow.color.setHex(0xff7a1a);
+        if (e.grounded) {
+          const k = Math.min(1, 6 * dt), spd = 2.4;
+          e.vel.x += (dx / hd * spd - e.vel.x) * k; e.vel.z += (dz / hd * spd - e.vel.z) * k;
+        }
+        if (e.born >= 1 && (e.cd -= dt) <= 0) {
+          const from = _ea.set(e.pos.x, e.pos.y + 2.6, e.pos.z);
+          if (hd < 7 && Math.abs(dy) < 4) e.wind = 0.9;
+          else if (hd > 14 && hasLOS(from, chest)) { fireProjectile(from, chest, 13, 15, 2); e.cd = 3.5; }
+          else e.cd = 0.4;
+        }
+      }
+      const px = e.pos.x, pz = e.pos.z;
+      e.grounded = moveBody(e.pos, e.vel, e.r, e.h, dt);
+      if (e.wind <= 0) unstick(e, px, pz, dx, dz, dt);
+      e.mesh.rotation.y = Math.atan2(dx, dz);
+      if (e.pos.y < -40) e.alive = false, e.dying = 1;
+
+    } else { // sniper: perched, aims a laser, locks, fires hitscan. Move off the line to dodge.
+      e.mesh.rotation.y = Math.atan2(dx, dz);
+      const eye = _ea.set(e.pos.x, e.pos.y + 1.6, e.pos.z);
+      if (e.aim > 0) {
+        e.aim -= dt;
+        if (e.aim > 0.35) e.lock.copy(chest);
+        const locked = e.aim <= 0.35;
+        _eb.subVectors(e.lock, eye).normalize();
+        losRay.set(eye, _eb); losRay.far = 250;
+        const wall = losRay.intersectObjects(levelMeshes, false)[0];
+        const len = wall ? wall.distance : 250;
+        _ef.copy(eye).addScaledVector(_eb, len);
+        setBeam(e.laser, eye, _ef, locked ? 0.09 : 0.035);
+        e.laser.material.color.setHex(locked ? 0xffffff : 0xff2a6a);
+        e.laser.material.opacity = locked ? 0.95 : 0.5;
+        e.glow.color.setHex(locked ? 0xffffff : 0xff2a6a);
+        if (e.aim <= 0) {
+          e.aim = 0; e.cd = 3 + Math.random() * 2; e.laser.visible = false;
+          let hitP = false;
+          for (const oy of [0.3, 0.9, 1.5]) {
+            _eg.set(pos.x, pos.y + oy, pos.z).sub(eye);
+            const t = _eg.dot(_eb);
+            if (t > 0 && t < len && _eg.addScaledVector(_eb, -t).length() < 0.55) hitP = true;
+          }
+          addTracer(eye, _ef, 0.25, 1, 0.3, 0.55);
+          sfxNoise('highpass', 2500, 0.3, 0.3, 0);
+          if (hitP) hurt(22);
+        }
+      } else {
+        e.glow.color.setHex(0xff2a6a);
+        if (e.born >= 1 && (e.cd -= dt) <= 0) {
+          if (hasLOS(eye, chest)) { e.aim = 1.4; e.lock.copy(chest); e.laser.visible = true; } else e.cd = 0.6;
+        }
+      }
     }
     e.mesh.position.copy(e.pos);
     e.mesh.updateMatrixWorld();
@@ -817,24 +1091,25 @@ const projGeo = new THREE.SphereGeometry(0.22, 10, 8);
 const projMat = new THREE.MeshBasicMaterial({ color: 0xff6a00 });
 for (let i = 0; i < 80; i++) {
   const m = new THREE.Mesh(projGeo, projMat); m.visible = false; scene.add(m);
-  projectiles.push({ m, vel: new THREE.Vector3(), life: 0, active: false });
+  projectiles.push({ m, vel: new THREE.Vector3(), life: 0, active: false, dmg: 10, size: 1 });
 }
-function fireProjectile(from, to) {
+function fireProjectile(from, to, speed = 20, dmg = 10, size = 1) {
   const p = projectiles.find(q => !q.active); if (!p) return;
   p.m.position.copy(from);
-  p.vel.subVectors(to, from).normalize().multiplyScalar(20);
-  p.life = 6; p.active = true; p.m.visible = true;
-  sfxNoise('bandpass', 900, 0.08, 0.15, 0);
+  p.vel.subVectors(to, from).normalize().multiplyScalar(speed);
+  p.life = 7; p.active = true; p.m.visible = true; p.dmg = dmg; p.size = size;
+  sfxNoise('bandpass', size > 1 ? 400 : 900, 0.08 * size, 0.15 * size, 0);
 }
 function updateProjectiles(dt) {
   for (const p of projectiles) {
     if (!p.active) continue;
     const q = p.m.position;
     q.addScaledVector(p.vel, dt);
-    p.m.scale.setScalar(1 + Math.sin(T * 30) * 0.15);
+    p.m.scale.setScalar(p.size * (1 + Math.sin(T * 30) * 0.15));
     p.life -= dt;
+    const rr = 0.25 * p.size;
     let dead = p.life <= 0;
-    if (!dead && Math.hypot(q.x - pos.x, q.z - pos.z) < R + 0.25 && q.y > pos.y - 0.2 && q.y < pos.y + H + 0.1) { hurt(10); dead = true; }
+    if (!dead && Math.hypot(q.x - pos.x, q.z - pos.z) < R + rr && q.y > pos.y - rr && q.y < pos.y + H + rr) { hurt(p.dmg); dead = true; }
     else if (!dead && hitSolid(q.x, q.y - 0.1, q.z, 0.1, 0.2)) { spawnSpark(q); dead = true; }
     if (dead) { p.active = false; p.m.visible = false; }
   }
@@ -920,16 +1195,18 @@ function fireCharge(a, c) {
   const hit = ray.intersectObjects(rayList(), true)[0];
   if (hit) _e.copy(hit.point); else _e.copy(_o).addScaledVector(_d, 250);
   const direct = hit?.object.userData.enemy;
-  if (direct) damage(direct, P.blastDamage * c, _d);
+  blastKills = 0;
+  if (direct) damage(direct, P.blastDamage * c, _d, 'blast');
   const rad = P.blastRadius * (0.5 + 0.5 * c);
   if (hit) {
     for (const e of enemies) {
       if (!e.alive || e === direct) continue;
       const d = center(e).distanceTo(_e);
-      if (d < rad) damage(e, P.blastDamage * c * (1 - d / rad * 0.6), _d);
+      if (d < rad) damage(e, P.blastDamage * c * (1 - d / rad * 0.6), _d, 'blast');
     }
     spawnBoom(_e, rad);
   }
+  if (blastKills >= 2) addScore(200 * (blastKills - 1), `MULTI x${blastKills}`);
   addTracer(_o, _e, 0.25, 0.4, 0.9, 1);
   _r.set(0.03, 0.02, 0).applyQuaternion(camera.quaternion); // a slightly fatter beam
   addTracer(_o.clone().add(_r), _e.clone().add(_r), 0.25, 0.4, 0.9, 1);
@@ -986,12 +1263,14 @@ function frame(dt) {
   handleButtons(dt);
   physics(dt);                 // integrates recoil added last frame
   dolly.updateMatrixWorld(true);
-  updateSpawner(dt);
+  updateWaves(dt);
+  updateBeacons();
   updateEnemies(dt);
   updateProjectiles(dt);
   updateArm(arms.left, dt);
   updateArm(arms.right, dt);
   updateFx(dt);
+  updateBanner(dt);
   hurtFlash = Math.max(0, hurtFlash - dt * 2.5);
   const lowHp = hp < 35 ? 0.08 + Math.sin(T * 6) * 0.04 : 0;
   hurtPlane.material.opacity = Math.max(lowHp, hurtFlash * 0.45);
@@ -1005,13 +1284,15 @@ function frame(dt) {
 if (new URLSearchParams(location.search).has('demo')) {
   // Scripted playback hook (used to record demo clips at a fixed timestep)
   window.__demo = {
-    frame, keys, mouse, P,
+    frame, keys, mouse, P, startWave: n => { game.wave = n - 1; game.state = 'breather'; game.t = 0.01; },
     setLocked: v => { locked = v; },
     look: (yaw, p) => { dolly.rotation.y = yaw; pitch = p; },
-    state: () => ({ pos: dolly.position.toArray(), yaw: dolly.rotation.y, pitch, vel: vel.toArray(), grounded, kills, hp,
+    state: () => ({ pos: dolly.position.toArray(), yaw: dolly.rotation.y, pitch, vel: vel.toArray(), grounded, kills, hp, score: game.score, wave: game.wave,
                     enemies: enemies.filter(e => e.alive).length,
                     heat: [arms.left.heat, arms.right.heat], over: [arms.left.overheated, arms.right.overheated] }),
-    targets: () => enemies.filter(e => e.alive && e.born >= 1).map(e => center(e).toArray()),
+    targets: () => { const eye = new THREE.Vector3(pos.x, pos.y + 1.6, pos.z);
+      return enemies.filter(e => e.alive && e.born >= 1 && hasLOS(eye, center(e))).map(e => center(e).toArray()); },
+    allTargets: () => enemies.filter(e => e.alive && e.born >= 1).map(e => center(e).toArray()),
   };
 } else {
   renderer.setAnimationLoop(() => {

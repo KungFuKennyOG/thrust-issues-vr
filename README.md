@@ -4,6 +4,17 @@ A VR boomer shooter where your guns are your jetpack. Your arms are machine-gun 
 
 **Play:** https://kungfukennyog.github.io/thrust-issues-vr/
 
+## How to play
+
+Survive waves of enemies. Clearing a wave gives bonus points and heals 30 HP, followed by a short breather before the next one. Your best score is saved.
+
+- **Flyers** chase you and ram you.
+- **Grunts** walk toward you and fire slow orbs you can dodge. Their visor flashes right before they shoot.
+- **Snipers** (wave 2+) sit on the high ledges. They aim a red laser at you, the laser turns white when they lock on, and then they fire. Move off the line.
+- **Heavies** (wave 3+) are armored, so bullets barely hurt them. Use charge blasts. They also slam the ground, so be in the air when they do.
+
+Scoring: kills while airborne are worth 1.5x, killing several enemies with one blast adds a multi-kill bonus, and staying airborne for 3 s or more pays out when you land. Kills also cool both arms and heal 5 HP. When a wave is down to its last 3 enemies, each one gets a red beacon so you can find it.
+
 ## Controls
 
 | | VR | Desktop |
