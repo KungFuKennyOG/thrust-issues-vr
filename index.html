@@ -937,7 +937,7 @@ function makeAimSight(color) {
 const _so = new THREE.Vector3(), _sd = new THREE.Vector3(), _se = new THREE.Vector3();
 function updateAimSight(a) {
   const S = a.sight, on = P.aimLaser >= 1 && !!a.controller;
-  S.beam.visible = S.dot.visible = on;
+  S.dot.visible = on; S.beam.visible = on && !(a.trigger && !a.overheated) && a.charge <= 0;
   if (!on) return;
   a.model.muzzle.getWorldPosition(_so);
   _sd.set(0, 0, -1).transformDirection(a.controller.matrixWorld);
@@ -950,6 +950,7 @@ function updateAimSight(a) {
   const hot = !!(locked || hit.enemy);
   S.dot.material.color.setHex(hot ? 0xff2a3a : S.color); S.beam.material.color.setHex(hot ? 0xff2a3a : S.color);
   S.dot.visible = hit.t < 120;
+  if (!(a.trigger && !a.overheated) && a.charge <= 0) S.beam.visible = true; else S.beam.visible = false;
 }
 function makeArmState(hand, color) {
   return { hand, model: makeArm(color, hand === 'left' ? -1 : 1), kick: 0, kickV: 0, kickRoll: 0, big: 0, smokeT: 0, controller: null, source: null, desk: false, heat: 0, overheated: false, spin: 0, acc: 0,
@@ -1284,11 +1285,13 @@ const streakCore = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1).transl
   new THREE.MeshBasicMaterial({ color: 0xfff4d0, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }), STREAK_N);
 const streakGlow = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1).translate(0, 0, -0.5),
   new THREE.MeshBasicMaterial({ color: 0xff7a20, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.55, depthWrite: false }), STREAK_N);
-for (const m of [streakCore, streakGlow]) { m.frustumCulled = false; scene.add(m); }
+const streakHead = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1),
+  new THREE.MeshBasicMaterial({ map: SOFT_TEX, color: 0xffc070, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }), STREAK_N);
+for (const m of [streakCore, streakGlow, streakHead]) { m.frustumCulled = false; scene.add(m); }
 const streaks = Array.from({ length: STREAK_N }, () => ({ on: false, o: new THREE.Vector3(), d: new THREE.Vector3(), n: new THREE.Vector3(),
   dist: 0, t: 0, hit: false, enemy: null, wall: false, fat: 1 }));
 let streakI = 0, streakCount = 0;
-{ _dm.position.set(0, -999, 0); _dm.scale.setScalar(0); _dm.updateMatrix(); for (let i = 0; i < STREAK_N; i++) { streakCore.setMatrixAt(i, _dm.matrix); streakGlow.setMatrixAt(i, _dm.matrix); } }
+{ _dm.position.set(0, -999, 0); _dm.scale.setScalar(0); _dm.updateMatrix(); for (let i = 0; i < STREAK_N; i++) { streakCore.setMatrixAt(i, _dm.matrix); streakGlow.setMatrixAt(i, _dm.matrix); streakHead.setMatrixAt(i, _dm.matrix); } }
 function spawnStreak(o, d, dist, enemy, wall, normal) {
   const s = streaks[streakI++ % STREAK_N];
   s.on = true; s.o.copy(o); s.d.copy(d); s.dist = dist; s.t = 0; s.hit = false; s.enemy = enemy; s.wall = wall;
@@ -1298,21 +1301,25 @@ function spawnStreak(o, d, dist, enemy, wall, normal) {
 function updateStreaks(dt) {
   streaks.forEach((s, i) => {
     if (!s.on) return;
-    s.t += 300 * dt;
-    const head = Math.min(s.t, s.dist), tail = Math.max(0, head - 5);
+    s.t += 140 * dt; // visual speed: slow enough to see; damage already landed
+    const head = Math.min(s.t, s.dist), tail = Math.max(0, head - 3.5);
     if (!s.hit && s.t >= s.dist) { // arrival: impact effects + sound
       s.hit = true; _cp.copy(s.o).addScaledVector(s.d, s.dist);
       if (s.enemy) impactEnemy(s.enemy, _cp, s.d); else if (s.wall) { impactWall(_cp, s.n, 1); addDecal(_cp, s.n); }
       sfxImpact(!!s.enemy, s.dist);
     }
-    if (tail >= s.dist) { s.on = false; _dm.position.set(0, -999, 0); _dm.scale.setScalar(0); _dm.updateMatrix(); streakCore.setMatrixAt(i, _dm.matrix); streakGlow.setMatrixAt(i, _dm.matrix); return; }
+    if (tail >= s.dist) { s.on = false; _dm.position.set(0, -999, 0); _dm.scale.setScalar(0); _dm.updateMatrix(); streakCore.setMatrixAt(i, _dm.matrix); streakGlow.setMatrixAt(i, _dm.matrix); streakHead.setMatrixAt(i, _dm.matrix); return; }
     _dm.position.copy(s.o).addScaledVector(s.d, head);
     _dm.quaternion.setFromUnitVectors(NEG_Z, s.d);
     const len = Math.max(0.01, head - tail);
-    _dm.scale.set(0.03 * s.fat, 0.03 * s.fat, len); _dm.updateMatrix(); streakCore.setMatrixAt(i, _dm.matrix);
-    _dm.scale.set(0.13 * s.fat, 0.13 * s.fat, len * 1.05); _dm.updateMatrix(); streakGlow.setMatrixAt(i, _dm.matrix);
+    _dm.scale.set(0.06 * s.fat, 0.06 * s.fat, len); _dm.updateMatrix(); streakCore.setMatrixAt(i, _dm.matrix);
+    _dm.scale.set(0.28 * s.fat, 0.28 * s.fat, len * 1.05); _dm.updateMatrix(); streakGlow.setMatrixAt(i, _dm.matrix);
+    // glowing head: a hot billboard riding the front of the bullet (gone once it has landed)
+    if (s.t < s.dist) { _dm.quaternion.copy(camQ); _dm.scale.setScalar(0.55 * s.fat); }
+    else { _dm.position.set(0, -999, 0); _dm.scale.setScalar(0); }
+    _dm.updateMatrix(); streakHead.setMatrixAt(i, _dm.matrix);
   });
-  streakCore.instanceMatrix.needsUpdate = streakGlow.instanceMatrix.needsUpdate = true;
+  streakCore.instanceMatrix.needsUpdate = streakGlow.instanceMatrix.needsUpdate = streakHead.instanceMatrix.needsUpdate = true;
 }
 // Scorch marks / bullet holes that stay on the walls (oldest get recycled)
 const DECAL_N = 220;
@@ -1409,6 +1416,12 @@ function initAudio() {
         const g = actx.createGain(); g.gain.value = 0; o.connect(f); f.connect(g); out(g, hand === 'left' ? -0.45 : 0.45, false); o.start(); return { o, g }; };
       whine[hand] = { spin: mk('sawtooth', 'lowpass', 1100), charge: mk('square', 'bandpass', 1400) };
     }
+    { // drone buzz bus: one voice, loudness = how many delivery drones are close
+      const o = actx.createOscillator(); o.type = 'sawtooth'; const f = actx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 650; f.Q.value = 2;
+      const g = actx.createGain(); g.gain.value = 0; const pn = actx.createStereoPanner ? actx.createStereoPanner() : null;
+      o.connect(f); f.connect(g); if (pn) { g.connect(pn); pn.connect(actx.destination); } else g.connect(actx.destination); o.start();
+      whine.buzz = { o, g, p: pn };
+    }
   } catch (e) { actx = null; }
 }
 let reverb = null; const whine = {};
@@ -1442,6 +1455,21 @@ function sfxImpact(flesh, dist) {
   const v = Math.max(0.15, 1 - dist / 60);
   if (flesh) { sfxNoise('lowpass', 420, 0.4 * v, 0.09, 0, 0.5); tone('sine', 110, 55, 0.25 * v, 0.08); }
   else sfxNoise('bandpass', 1700 + Math.random() * 900, 0.18 * v, 0.05, (Math.random() - 0.5) * 0.6, 1.2);
+}
+const _pf = new THREE.Vector3();
+function panOf(p) { camera.getWorldDirection(_pf); const dx = p.x - pos.x, dz = p.z - pos.z, d = Math.hypot(dx, dz) || 1; return Math.max(-1, Math.min(1, (dx * -_pf.z + dz * _pf.x) / d)); }
+function volOf(p) { const d = p.distanceTo(pos); return 1 / (1 + d * d / 500); }
+function sfxZap(p) { if (!actx) return; const v = volOf(p), pn = panOf(p); tone('square', 950, 260, 0.13 * v, 0.14, pn); sfxNoise('bandpass', 1300, 0.12 * v, 0.08, pn); }
+function sfxBeep(p, f) { if (!actx) return; const v = Math.max(0.35, volOf(p)); tone('sine', f, f, 0.09 * v, 0.09, panOf(p), false); }
+function sfxStep(p) { if (!actx) return; const v = volOf(p), pn = panOf(p); tone('sine', 75, 38, 0.6 * v, 0.2, pn); sfxNoise('lowpass', 220, 0.35 * v, 0.15, pn, 0.5); }
+function updateEnemySounds() {
+  if (!actx || !whine.buzz) return;
+  let sum = 0, near = null, nd = 1e9;
+  for (const e of enemies) if (e.alive && e.type === 'flyer') { const d = e.pos.distanceTo(pos); sum += 1 / (1 + d * d / 60); if (d < nd) { nd = d; near = e; } }
+  const t = actx.currentTime;
+  whine.buzz.g.gain.setTargetAtTime(Math.min(0.09, 0.035 * sum), t, 0.08);
+  whine.buzz.o.frequency.setTargetAtTime(150 + Math.sin(T * 9) * 12 + Math.min(60, sum * 20), t, 0.05);
+  if (near && whine.buzz.p) whine.buzz.p.pan.setTargetAtTime(panOf(near.pos), t, 0.1);
 }
 function sfxKill() {
   if (!actx) return;
@@ -1627,10 +1655,10 @@ const GEO = {
   beam: new THREE.BoxGeometry(1, 1, 1).translate(0, 0, 0.5),
 };
 const STATS = {
-  grunt:  { hit: 0.85, hp: 8,  r: 0.45, h: 1.9, cy: 1.1, pts: 150, color: 0xff3b2a, em: 0x3a0804, glow: 0xffe23a },
-  flyer:  { hit: 0.8, hp: 4,  r: 0.5,  h: 1.0, cy: 0.5, pts: 100, color: 0xffd21a, em: 0x3a2a00, glow: 0x30f0ff },
-  heavy:  { hit: 1.55, hp: 40, r: 0.9,  h: 3.0, cy: 1.6, pts: 500, color: 0x9aa0ae, em: 0x101018, glow: 0xff7a1a },
-  sniper: { hit: 0.85, hp: 5,  r: 0.45, h: 1.9, cy: 1.2, pts: 300, color: 0xc04aff, em: 0x200838, glow: 0xff2a6a },
+  grunt:  { hit: 0.85, hp: 8,  r: 0.45, h: 1.9, cy: 1.1, pts: 150, color: 0xd8382a, em: 0x2a0604, glow: 0xffe23a, tex: ['#c8322a', '#f2c21b', '진압'] },
+  flyer:  { hit: 0.8, hp: 4,  r: 0.5,  h: 1.0, cy: 0.5, pts: 100, color: 0xf2c21b, em: 0x2a2000, glow: 0x30f0ff, tex: ['#f0c018', '#151515', '배달'] },
+  heavy:  { hit: 1.55, hp: 40, r: 0.9,  h: 3.0, cy: 1.6, pts: 500, color: 0x9aa0ae, em: 0x0c0c12, glow: 0xff7a1a, tex: ['#8a909c', '#f2c21b', '건설'] },
+  sniper: { hit: 0.85, hp: 5,  r: 0.45, h: 1.9, cy: 1.2, pts: 300, color: 0x8a3aba, em: 0x18062a, glow: 0xff2a6a, tex: ['#5a2a7a', '#ff2a6a', 'CCTV'] },
 };
 const TOON_RAMP = (() => { const t = new THREE.DataTexture(new Uint8Array([90, 170, 255]), 3, 1, THREE.RedFormat);
   t.magFilter = t.minFilter = THREE.NearestFilter; t.needsUpdate = true; return t; })();
@@ -1649,35 +1677,117 @@ function addPart(e, geo, mat) {
   e.mesh.add(m);
   return m;
 }
+// Enemy textures: one 64x64 sheet per type. Top half = plain painted panel, bottom-left = hazard stripes,
+// bottom-right = stencilled label. Each model part samples one of those regions.
+const RG = { PLAIN: [0, 0.5, 1, 1], HAZ: [0, 0, 0.5, 0.5], LBL: [0.5, 0, 1, 0.5] };
+const ENEMY_TEX = {};
+function enemyTex(type) {
+  if (ENEMY_TEX[type]) return ENEMY_TEX[type];
+  const [base, accent, label] = STATS[type].tex;
+  return (ENEMY_TEX[type] = tex(64, 64, 300 + type.length * 7, (g, w, h, r) => {
+    speckle(g, w, h, r, base, 0.32);
+    g.fillStyle = 'rgba(0,0,0,0.4)'; g.fillRect(0, 31, w, 2); g.fillRect(31, 32, 2, 32); g.fillRect(0, 0, w, 2); g.fillRect(0, 0, 2, h);
+    g.fillStyle = 'rgba(255,255,255,0.2)'; g.fillRect(2, 2, w - 4, 2);
+    g.fillStyle = 'rgba(255,255,255,0.2)'; for (let i = 0; i < 9; i++) g.fillRect(r() * w | 0, r() * 30 | 0, 2 + r() * 7 | 0, 1); // scratches
+    g.fillStyle = 'rgba(0,0,0,0.3)'; g.fillRect(0, 14, w, 1);                                                                      // panel seam
+    g.fillStyle = '#1a1a22'; for (const [x, y] of [[5, 6], [w - 8, 6], [5, 24], [w - 8, 24]]) g.fillRect(x, y, 3, 3);              // bolts
+    g.save(); g.beginPath(); g.rect(0, 33, 31, 31); g.clip(); g.fillStyle = accent; g.fillRect(0, 33, 31, 31); g.fillStyle = '#151515';
+    for (let i = -32; i < 32; i += 10) { g.beginPath(); g.moveTo(i, 64); g.lineTo(i + 5, 64); g.lineTo(i + 36, 33); g.lineTo(i + 31, 33); g.fill(); } g.restore();
+    g.fillStyle = 'rgba(15,15,20,0.9)'; g.textAlign = 'center'; g.textBaseline = 'middle'; fitText(g, label, 48, 49, 27, 15);
+  }));
+}
+// part(): bake a box into the model with a texture region and walk-cycle attributes (swing = which way it swings, pivot = hip/shoulder height)
+function part(list, geo, pos, region = RG.PLAIN, rot = null, swing = 0, pivot = 0) {
+  let g = mapUV(geo.index ? geo.toNonIndexed() : geo.clone(), region);
+  if (rot) g.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...rot)));
+  g.translate(...pos);
+  const n = g.attributes.position.count;
+  g.setAttribute('aSwing', new THREE.Float32BufferAttribute(new Float32Array(n).fill(swing), 1));
+  g.setAttribute('aPivot', new THREE.Float32BufferAttribute(new Float32Array(n).fill(pivot), 1));
+  list.push(g);
+}
+const B3 = (w, h, d) => new THREE.BoxGeometry(w, h, d);
 // Each enemy type is baked into 3 merged geometries (body, outline hull, glow) = 3 draw calls per enemy
 const ENEMY_GEOS = {};
 function enemyGeos(type) {
   if (ENEMY_GEOS[type]) return ENEMY_GEOS[type];
-  const body = [], glow = [];
-  const put = (list, geo, pos = [0, 0, 0], rot = null) => {
-    let g = geo.index ? geo.toNonIndexed() : geo.clone();
-    if (rot) g.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...rot)));
-    list.push(g.translate(...pos));
+  const b = [], gl = [], { PLAIN, HAZ, LBL } = RG;
+  if (type === 'grunt') { // riot bot with an arm cannon
+    for (const sx of [-1, 1]) {
+      part(b, B3(0.26, 0.12, 0.36), [sx * 0.16, 0.06, 0.05], HAZ, null, sx, 0.84);   // feet
+      part(b, B3(0.2, 0.72, 0.24), [sx * 0.16, 0.48, 0], PLAIN, null, sx, 0.84);      // legs
+      part(b, B3(0.3, 0.2, 0.42), [sx * 0.5, 1.58, 0], HAZ);                          // shoulder pads
+    }
+    part(b, B3(0.5, 0.18, 0.3), [0, 0.9, 0]);                                         // pelvis
+    part(b, B3(0.78, 0.6, 0.46), [0, 1.28, 0], LBL);                                  // torso
+    part(b, B3(0.56, 0.3, 0.06), [0, 1.3, 0.25], HAZ);                                // chest plate
+    part(b, B3(0.15, 0.55, 0.17), [-0.5, 1.2, 0], PLAIN, null, -1, 1.5);              // left arm (swings)
+    part(b, B3(0.19, 0.17, 0.19), [-0.5, 0.86, 0.02], PLAIN, null, -1, 1.5);          // left fist
+    part(b, B3(0.17, 0.4, 0.19), [0.5, 1.32, 0]);                                     // right upper arm
+    part(b, B3(0.2, 0.2, 0.64), [0.5, 1.12, 0.22]);                                   // arm cannon
+    part(b, B3(0.4, 0.34, 0.38), [0, 1.75, 0]);                                       // head
+    part(b, B3(0.44, 0.07, 0.42), [0, 1.93, 0], HAZ);                                 // helmet rim
+    part(b, B3(0.03, 0.28, 0.03), [0.13, 2.08, -0.08]);                               // antenna
+    part(gl, B3(0.32, 0.07, 0.04), [0, 1.77, 0.2]);                                   // visor
+    part(gl, B3(0.12, 0.12, 0.03), [0.5, 1.12, 0.55]);                                // cannon muzzle
+  } else if (type === 'flyer') { // delivery drone: rotors, cargo box, a ram spike
+    part(b, B3(0.7, 0.28, 0.7), [0, 0.5, 0], LBL);
+    part(b, B3(0.4, 0.16, 0.4), [0, 0.72, 0]);
+    part(b, B3(0.42, 0.3, 0.42), [0, 0.22, 0], HAZ);
+    for (const a of [Math.PI / 4, -Math.PI / 4]) part(b, B3(1.5, 0.06, 0.1), [0, 0.57, 0], PLAIN, [0, a, 0]);
+    for (const [x, z] of [[0.53, 0.53], [-0.53, 0.53], [0.53, -0.53], [-0.53, -0.53]]) {
+      part(b, new THREE.CylinderGeometry(0.3, 0.3, 0.04, 10), [x, 0.62, z], HAZ);     // rotor guards
+      part(b, B3(0.56, 0.02, 0.07), [x, 0.66, z], PLAIN, [0, x * z > 0 ? 0.5 : -0.9, 0]); // blades
+    }
+    part(b, new THREE.ConeGeometry(0.09, 0.42, 6), [0, 0.45, 0.52], HAZ, [Math.PI / 2, 0, 0]); // ram spike
+    part(gl, B3(0.18, 0.12, 0.04), [0, 0.52, 0.36]);                                  // camera eye
+  } else if (type === 'heavy') { // construction mech
+    for (const sx of [-1, 1]) {
+      part(b, B3(0.6, 0.2, 0.75), [sx * 0.4, 0.1, 0.08], HAZ, null, sx, 1.1);
+      part(b, B3(0.45, 0.95, 0.55), [sx * 0.4, 0.67, 0], PLAIN, null, sx, 1.1);
+      part(b, B3(0.6, 0.6, 0.85), [sx * 1.15, 2.2, 0], HAZ);                          // shoulders
+      part(b, B3(0.38, 0.9, 0.4), [sx * 1.15, 1.45, 0], PLAIN, null, -sx, 1.9);       // arms
+      part(b, B3(0.62, 0.5, 0.62), [sx * 1.15, 0.85, 0.05], PLAIN, null, -sx, 1.9);   // claws
+      part(b, B3(0.16, 0.6, 0.16), [sx * 0.45, 2.75, -0.45]);                         // exhaust stacks
+    }
+    part(b, B3(1.1, 0.3, 0.65), [0, 1.2, 0]);
+    part(b, B3(1.7, 1.15, 1.1), [0, 1.9, 0], LBL);
+    part(b, B3(0.8, 0.36, 0.7), [0, 2.65, 0.05], HAZ);
+    part(gl, B3(0.9, 0.32, 0.04), [0, 2.15, 0.56]);                                   // cab window
+  } else { // sniper: CCTV-headed sentinel with a long rifle
+    part(b, B3(0.6, 0.12, 0.6), [0, 0.06, 0], HAZ);
+    part(b, B3(0.3, 1.0, 0.3), [0, 0.6, 0]);
+    part(b, B3(0.46, 0.56, 0.36), [0, 1.3, 0], LBL);
+    part(b, B3(0.62, 0.12, 0.3), [0, 1.63, 0]);
+    part(b, B3(0.26, 0.24, 0.5), [0, 1.82, 0.08]);
+    part(b, B3(0.34, 0.06, 0.58), [0, 1.97, 0.08], HAZ);
+    part(b, B3(0.08, 0.09, 1.5), [0.22, 1.45, 0.55]);
+    part(b, B3(0.07, 0.07, 0.3), [0.22, 1.55, 0.35]);
+    part(gl, B3(0.15, 0.15, 0.04), [0, 1.82, 0.34]);                                  // lens
+  }
+  const t = type === 'heavy' ? 0.07 : 0.045;
+  return (ENEMY_GEOS[type] = { body: mergeGeometries(b), outline: mergeGeometries(b.map(g => outlineGeo(g, t))), glow: mergeGeometries(gl) });
+}
+// Enemy materials: PS1 dither/snap + a per-enemy walk uniform that swings the legs/arms in the vertex shader (no extra draw calls)
+function enemyMat(m, e) {
+  m.userData.ps1 = true; m.dithering = true;
+  m.onBeforeCompile = sh => {
+    sh.uniforms.ps1Snap = PS1.snap; sh.uniforms.uWalk = e.walkU;
+    sh.vertexShader = 'attribute float aSwing;\nattribute float aPivot;\nuniform float uWalk;\nuniform float ps1Snap;\n' + sh.vertexShader
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+  if (aSwing != 0.0) { float an = aSwing * uWalk, cs = cos(an), sn = sin(an); vec3 q = transformed - vec3(0.0, aPivot, 0.0);
+    transformed = vec3(q.x, q.y * cs - q.z * sn, q.y * sn + q.z * cs) + vec3(0.0, aPivot, 0.0); }`)
+      .replace('#include <project_vertex>', '#include <project_vertex>\n  if (ps1Snap > 0.0) gl_Position.xy = floor(gl_Position.xy / gl_Position.w * ps1Snap + 0.5) / ps1Snap * gl_Position.w;');
   };
-  if (type === 'grunt') { put(body, GEO.legs); put(body, GEO.torso); put(body, GEO.head); put(glow, GEO.visor); }
-  else if (type === 'flyer') {
-    put(body, GEO.orb); put(glow, GEO.eye);
-    for (const [x, y, z, rx, rz] of [[0.55, 0.5, 0, 0, -Math.PI / 2], [-0.55, 0.5, 0, 0, Math.PI / 2], [0, 1.05, 0, 0, 0], [0, -0.05, 0, Math.PI, 0]])
-      put(body, GEO.spike, [x, y, z], [rx, 0, rz]); // cones point +Y by default
-  } else if (type === 'heavy') {
-    put(body, GEO.hLegs); put(body, GEO.hTorso); put(body, GEO.hHead); put(glow, GEO.hVisor);
-    for (const sx of [-1, 1]) { put(body, GEO.hPlate, [sx * 1.15, 2.15, 0]); put(body, GEO.hFist, [sx * 1.1, 1.05, 0.15]); }
-  } else { put(body, GEO.sBody); put(body, GEO.sHead); put(body, GEO.sBarrel); put(glow, GEO.sEye); }
-  const t = type === 'heavy' ? 0.07 : 0.05;
-  return (ENEMY_GEOS[type] = { body: mergeGeometries(body), outline: mergeGeometries(body.map(g => outlineGeo(g, t))), glow: mergeGeometries(glow) });
+  m.customProgramCacheKey = () => 'ps1walk';
 }
 function makeEnemy(type, p) {
   const S = STATS[type];
   const e = { type, mesh: new THREE.Group(), pos: p.clone(), vel: new THREE.Vector3(), alive: true, dying: -1, born: 0,
               flash: 0, ping: 0, cd: 1 + Math.random() * 1.5, wind: 0, aim: 0, lock: new THREE.Vector3(),
               strafe: Math.random() < 0.5 ? -1 : 1, strafeT: 2, grounded: false, mats: [], extras: [],
-              hp: S.hp, r: S.r, h: S.h, cy: S.cy };
-  const body = new THREE.MeshToonMaterial({ color: S.color, emissive: S.em, gradientMap: TOON_RAMP, transparent: true });
+              hp: S.hp, r: S.r, h: S.h, cy: S.cy, walkU: { value: 0 }, walkPh: Math.random() * 6, visY: 0, smokeT: 0 };
+  const body = new THREE.MeshToonMaterial({ color: 0xffffff, map: enemyTex(type), emissive: S.em, gradientMap: TOON_RAMP, transparent: true });
   const glow = new THREE.MeshBasicMaterial({ color: S.glow, transparent: true });
   e.mats.push(body, glow); e.body = body; e.glow = glow;
   const G = enemyGeos(type);
@@ -1686,7 +1796,7 @@ function makeEnemy(type, p) {
   for (const [geo, mat] of [[G.outline, ol], [G.body, body], [G.glow, glow]]) {
     const m = new THREE.Mesh(geo, mat); m.userData.enemy = e; e.mesh.add(m);
   }
-  ps1Mat(body); ps1Mat(glow); ps1Mat(ol);
+  enemyMat(body, e); enemyMat(glow, e); enemyMat(ol, e);
   if (type === 'sniper') {
     const lm = new THREE.MeshBasicMaterial({ color: 0xff2a6a, transparent: true, opacity: 0.55,
                                              blending: THREE.AdditiveBlending, depthWrite: false });
@@ -1857,6 +1967,7 @@ function slam(e) {
 }
 
 function updateEnemies(dt) {
+  updateEnemySounds();
   for (let i = enemies.length - 1; i >= 0; i--) {
     const e = enemies[i];
     if (!e.alive) { // death pop
@@ -1892,7 +2003,9 @@ function updateEnemies(dt) {
         vel.addScaledVector(_ed, 6);
         e.cd = 0.9;
       }
-      e.mesh.rotation.y += dt * 2;
+      { const hs = Math.hypot(e.vel.x, e.vel.z); // face you, pitch into the dive, bob and wobble
+        e.mesh.rotation.set(Math.min(0.55, hs * 0.045), Math.atan2(dx, dz), Math.sin(T * 3 + i) * 0.08);
+        e.visY = Math.sin(T * 4 + i * 1.7) * 0.08; }
       e.glow.color.setHex(e.cd > 0.6 ? 0xffffff : 0x66ffee);
 
     } else if (e.type === 'grunt') {
@@ -1910,12 +2023,15 @@ function updateEnemies(dt) {
       e.grounded = moveBody(e.pos, e.vel, e.r, e.h, dt);
       unstick(e, px, pz, tx, tz, dt);
       e.mesh.rotation.y = Math.atan2(dx, dz);
+      { const hs = Math.hypot(e.vel.x, e.vel.z), k = Math.min(1, hs / 2.5); // walk cycle
+        e.walkPh += dt * (2.5 + hs * 2.6); e.walkU.value = Math.sin(e.walkPh) * 0.6 * k; e.visY = Math.abs(Math.cos(e.walkPh)) * 0.06 * k; }
       // shooting: wind-up (bright visor) then fire a dodgeable orb
       if (e.wind > 0) {
         e.wind -= dt;
         e.glow.color.setHex(Math.floor(T * 20) % 2 ? 0xffffff : 0xff3300);
         if (e.wind <= 0) {
-          fireProjectile(_ea.set(e.pos.x, e.pos.y + 1.66, e.pos.z), chest, 20, 10, 1);
+          { const yw = Math.atan2(dx, dz), cs = Math.cos(yw), sn = Math.sin(yw); // out of the arm cannon
+            fireProjectile(_ea.set(e.pos.x + 0.5 * cs + 0.58 * sn, e.pos.y + 1.12, e.pos.z - 0.5 * sn + 0.58 * cs), chest, 20, 10, 1); sfxZap(e.pos); }
           e.cd = 1.4 + Math.random() * 1.6;
         }
       } else {
@@ -1954,15 +2070,23 @@ function updateEnemies(dt) {
       e.grounded = moveBody(e.pos, e.vel, e.r, e.h, dt);
       if (e.wind <= 0) unstick(e, px, pz, dx, dz, dt);
       e.mesh.rotation.y = Math.atan2(dx, dz);
+      { const hs = Math.hypot(e.vel.x, e.vel.z), k = Math.min(1, hs / 1.5), prev = Math.sin(e.walkPh); // stomp cycle
+        e.walkPh += dt * hs * 2.2; e.walkU.value = Math.sin(e.walkPh) * 0.38 * k; e.visY = -Math.abs(Math.sin(e.walkPh)) * 0.08 * k;
+        if (k > 0.3 && Math.sign(prev) !== Math.sign(Math.sin(e.walkPh))) { sfxStep(e.pos);
+          emit(smokePool, _cp.set(e.pos.x, e.pos.y + 0.1, e.pos.z), _cv.set(0, 0.4, 0), 0.8, 0.5, 0x2a2622, { grow: 2.5 }); }
+        if ((e.smokeT -= dt) <= 0) { e.smokeT = 0.22; const yw = Math.atan2(dx, dz), sx = Math.random() < 0.5 ? -0.45 : 0.45; // exhaust
+          emit(smokePool, _cp.set(e.pos.x + sx * Math.cos(yw) - 0.45 * Math.sin(yw), e.pos.y + 3.1, e.pos.z - sx * Math.sin(yw) - 0.45 * Math.cos(yw)),
+               _cv.set(0, 1.2, 0), 1.4, 0.18, 0x1e1c1a, { grow: 4 }); } }
       if (e.pos.y < FALL_Y) e.alive = false, e.dying = 1;
 
     } else { // sniper: perched, aims a laser, locks, fires hitscan. Move off the line to dodge.
       e.mesh.rotation.y = Math.atan2(dx, dz);
-      const eye = _ea.set(e.pos.x, e.pos.y + 1.6, e.pos.z);
+      const eye = _ea.set(e.pos.x, e.pos.y + 1.82, e.pos.z);
       if (e.aim > 0) {
         e.aim -= dt;
         if (e.aim > 0.35) e.lock.copy(chest);
         const locked = e.aim <= 0.35;
+        if (locked && !e.lockBeep) { e.lockBeep = true; sfxBeep(e.pos, 2400); }
         _eb.subVectors(e.lock, eye).normalize();
         losRay.set(eye, _eb); losRay.far = 250;
         const wall = losRay.intersectObjects(levelMeshes, false)[0];
@@ -1987,11 +2111,11 @@ function updateEnemies(dt) {
       } else {
         e.glow.color.setHex(0xff2a6a);
         if (e.born >= 1 && (e.cd -= dt) <= 0) {
-          if (hasLOS(eye, chest)) { e.aim = 1.4; e.lock.copy(chest); e.laser.visible = true; } else e.cd = 0.6;
+          if (hasLOS(eye, chest)) { e.aim = 1.4; e.lock.copy(chest); e.laser.visible = true; e.lockBeep = false; sfxBeep(e.pos, 1200); } else e.cd = 0.6;
         }
       }
     }
-    e.mesh.position.copy(e.pos);
+    e.mesh.position.copy(e.pos); e.mesh.position.y += e.visY;
     if (e.flinch > 0) { // hit jolt: a quick shove and squash
       e.flinch = Math.max(0, e.flinch - dt * 9);
       e.mesh.position.x += (Math.random() - 0.5) * 0.12 * e.flinch; e.mesh.position.z += (Math.random() - 0.5) * 0.12 * e.flinch;
@@ -2004,7 +2128,7 @@ function updateEnemies(dt) {
 // ---------- Enemy projectiles ----------
 const projectiles = [];
 const projGeo = new THREE.SphereGeometry(0.22, 10, 8);
-const projMat = new THREE.MeshBasicMaterial({ color: 0xff6a00 });
+const projMat = new THREE.MeshBasicMaterial({ color: 0xffa040 });
 for (let i = 0; i < 80; i++) {
   const m = new THREE.Mesh(projGeo, projMat); m.visible = false; scene.add(m);
   projectiles.push({ m, vel: new THREE.Vector3(), life: 0, active: false, dmg: 10, size: 1 });
@@ -2022,6 +2146,7 @@ function updateProjectiles(dt) {
     const q = p.m.position;
     q.addScaledVector(p.vel, dt);
     p.m.scale.setScalar(p.size * (1 + Math.sin(T * 30) * 0.15));
+    if ((p.trailT = (p.trailT || 0) - dt) <= 0) { p.trailT = 0.025; emit(smokePool, q, _cv.set(0, 0, 0), 0.3, 0.5 * p.size, 0xff5a10, { grow: -0.6 }); }
     p.life -= dt;
     const rr = 0.25 * p.size;
     let dead = p.life <= 0;
