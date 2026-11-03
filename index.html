@@ -66,8 +66,8 @@ const DEFAULTS = {
   groundCoolMult: 2.0,
   ventThreshold: 0.35, // overheat unlocks below this
   killCool: 0.35,      // heat removed from both arms per kill
-  spreadBase: 0.8,     // degrees
-  spreadHeat: 2.5,     // extra degrees at max heat
+  spreadBase: 0.5,     // degrees
+  spreadHeat: 1.5,     // extra degrees at max heat
   chargeKick: 16,      // m/s launch at full charge
   chargeTime: 0.6,     // s to full charge
   chargeHeat: 0.35,    // heat cost at full charge
@@ -75,6 +75,9 @@ const DEFAULTS = {
   blastDamage: 20,
   enemyDamage: 1,      // multiplier on damage enemies deal
   groundKick: 0.4,     // fraction of horizontal MG recoil applied while standing
+  aimAssist: 6,        // degrees: shots bend onto an enemy inside this cone around the barrel
+  hitPad: 1,           // hitbox size multiplier
+  aimLaser: 1,         // 1 = show aim beam + dot
 };
 const DEFS = [
   ['kick', 'Kick per bullet (m/s)', 0, 3, 0.05],
@@ -99,11 +102,14 @@ const DEFS = [
   ['blastDamage', 'Blast damage', 1, 60, 1],
   ['enemyDamage', 'Enemy damage ×', 0, 3, 0.1],
   ['groundKick', 'Ground horiz. recoil ×', 0, 1, 0.05],
+  ['aimAssist', 'Aim assist cone (°)', 0, 20, 1],
+  ['hitPad', 'Hitbox size ×', 0.5, 2, 0.1],
+  ['aimLaser', 'Aim laser (0/1)', 0, 1, 1],
 ];
 const P = { ...DEFAULTS };
-try { const s = JSON.parse(localStorage.getItem('recoilParams_v3') || 'null'); if (s) Object.assign(P, s); } catch (e) {}
+try { const s = JSON.parse(localStorage.getItem('recoilParams_v4') || 'null'); if (s) Object.assign(P, s); } catch (e) {}
 const decimals = step => (String(step).split('.')[1] || '').length;
-function saveP() { try { localStorage.setItem('recoilParams_v3', JSON.stringify(P)); } catch (e) {} }
+function saveP() { try { localStorage.setItem('recoilParams_v4', JSON.stringify(P)); } catch (e) {} }
 
 // 2D slider panel (visible in the browser before entering VR)
 const sliderEls = {};
@@ -787,12 +793,40 @@ function makeArm(color) {
   group.add(orb);
   return { group, barrels, barFill, muzzle, flash, orb };
 }
+// Aim laser: a faint beam from each barrel and a dot where it lands (red when it's on an enemy or assist will catch one)
+const aimDotGeo = new THREE.SphereGeometry(0.07, 8, 6);
+function makeAimSight(color) {
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1).translate(0, 0, 0.5),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false }));
+  const dot = new THREE.Mesh(aimDotGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false }));
+  beam.visible = dot.visible = false; beam.renderOrder = dot.renderOrder = 5;
+  scene.add(beam, dot);
+  return { beam, dot, color };
+}
+const _so = new THREE.Vector3(), _sd = new THREE.Vector3(), _se = new THREE.Vector3();
+function updateAimSight(a) {
+  const S = a.sight, on = P.aimLaser >= 1 && !!a.controller;
+  S.beam.visible = S.dot.visible = on;
+  if (!on) return;
+  a.model.muzzle.getWorldPosition(_so);
+  _sd.set(0, 0, -1).transformDirection(a.controller.matrixWorld);
+  const locked = assistTarget(_so, _sd, P.aimAssist);
+  const d = locked ? _sd.copy(center(locked)).sub(_so).normalize() : _sd;
+  const hit = castShot(_so, d, 120);
+  _se.copy(_so).addScaledVector(d, hit.t);
+  S.beam.position.copy(_so); S.beam.lookAt(_se); S.beam.scale.set(0.012, 0.012, Math.max(0.01, hit.t));
+  S.dot.position.copy(_se); S.dot.scale.setScalar(0.6 + hit.t * 0.03);
+  const hot = !!(locked || hit.enemy);
+  S.dot.material.color.setHex(hot ? 0xff2a3a : S.color); S.beam.material.color.setHex(hot ? 0xff2a3a : S.color);
+  S.dot.visible = hit.t < 120;
+}
 function makeArmState(hand, color) {
   return { hand, model: makeArm(color), controller: null, source: null, desk: false, heat: 0, overheated: false, spin: 0, acc: 0,
            trigger: false, prevTrigger: false, grip: false, prevGrip: false, charge: 0, chargeBuzz: 0,
            sx: 0, sy: 0, btnA: false, prevA: false, btnB: false, flashT: 0 };
 }
 const arms = { left: makeArmState('left', 0x2f8fff), right: makeArmState('right', 0xff8a2f) };
+arms.left.sight = makeAimSight(0x7ac8ff); arms.right.sight = makeAimSight(0xffc08a);
 
 for (let i = 0; i < 2; i++) {
   const c = renderer.xr.getController(i);
@@ -1250,10 +1284,10 @@ const GEO = {
   beam: new THREE.BoxGeometry(1, 1, 1).translate(0, 0, 0.5),
 };
 const STATS = {
-  grunt:  { hp: 8,  r: 0.45, h: 1.9, cy: 1.1, pts: 150, color: 0xff3b2a, em: 0x3a0804, glow: 0xffe23a },
-  flyer:  { hp: 4,  r: 0.5,  h: 1.0, cy: 0.5, pts: 100, color: 0xffd21a, em: 0x3a2a00, glow: 0x30f0ff },
-  heavy:  { hp: 40, r: 0.9,  h: 3.0, cy: 1.6, pts: 500, color: 0x9aa0ae, em: 0x101018, glow: 0xff7a1a },
-  sniper: { hp: 5,  r: 0.45, h: 1.9, cy: 1.2, pts: 300, color: 0xc04aff, em: 0x200838, glow: 0xff2a6a },
+  grunt:  { hit: 0.85, hp: 8,  r: 0.45, h: 1.9, cy: 1.1, pts: 150, color: 0xff3b2a, em: 0x3a0804, glow: 0xffe23a },
+  flyer:  { hit: 0.8, hp: 4,  r: 0.5,  h: 1.0, cy: 0.5, pts: 100, color: 0xffd21a, em: 0x3a2a00, glow: 0x30f0ff },
+  heavy:  { hit: 1.55, hp: 40, r: 0.9,  h: 3.0, cy: 1.6, pts: 500, color: 0x9aa0ae, em: 0x101018, glow: 0xff7a1a },
+  sniper: { hit: 0.85, hp: 5,  r: 0.45, h: 1.9, cy: 1.2, pts: 300, color: 0xc04aff, em: 0x200838, glow: 0xff2a6a },
 };
 const TOON_RAMP = (() => { const t = new THREE.DataTexture(new Uint8Array([90, 170, 255]), 3, 1, THREE.RedFormat);
   t.magFilter = t.minFilter = THREE.NearestFilter; t.needsUpdate = true; return t; })();
@@ -1681,28 +1715,63 @@ function handleButtons(dt) {
 // ---------- Shooting ----------
 const ray = new THREE.Raycaster();
 const _o = new THREE.Vector3(), _d = new THREE.Vector3(), _s = new THREE.Vector3(), _r = new THREE.Vector3(), _e = new THREE.Vector3();
-function rayList() {
-  const list = levelMeshes.slice();
-  for (const e of enemies) if (e.alive) list.push(e.mesh);
-  return list;
+// Hit test: a padded sphere per enemy (much more forgiving than the exact mesh), vs the level geometry
+function raySphere(o, d, c, r) {
+  const ox = o.x - c.x, oy = o.y - c.y, oz = o.z - c.z;
+  const b = ox * d.x + oy * d.y + oz * d.z, q = ox * ox + oy * oy + oz * oz - r * r, disc = b * b - q;
+  if (disc < 0) return -1;
+  const sq = Math.sqrt(disc); let t = -b - sq; if (t < 0) t = -b + sq;
+  return t >= 0 ? t : -1;
 }
+function castShot(o, d, far = 250) {
+  ray.set(o, d); ray.far = far;
+  const wall = ray.intersectObjects(levelMeshes, false)[0];
+  let best = null, bestT = wall ? wall.distance : far;
+  for (const e of enemies) {
+    if (!e.alive || e.born < 1) continue;
+    const t = raySphere(o, d, center(e), STATS[e.type].hit * P.hitPad);
+    if (t >= 0 && t < bestT) { best = e; bestT = t; }
+  }
+  return { enemy: best, t: bestT, wall: !best && !!wall };
+}
+// Aim assist: the enemy closest to the barrel's line, inside the cone (widened by its size), with line of sight
+const _aa = new THREE.Vector3();
+function assistTarget(o, d, deg) {
+  if (deg <= 0) return null;
+  let best = null, bestA = Infinity;
+  for (const e of enemies) {
+    if (!e.alive || e.born < 1) continue;
+    _aa.copy(center(e)).sub(o);
+    const dist = _aa.length(); if (dist < 0.5 || dist > 150) continue;
+    const ang = Math.acos(Math.min(1, _aa.dot(d) / dist));
+    const cone = THREE.MathUtils.degToRad(deg) + Math.atan(STATS[e.type].hit * P.hitPad / dist);
+    if (ang < cone && ang < bestA && hasLOS(o, center(e))) { best = e; bestA = ang; }
+  }
+  return best;
+}
+const _aim = new THREE.Vector3();
+function aimDir(o, d, deg) { // barrel direction, bent onto an assist target if there is one
+  const e = assistTarget(o, d, deg);
+  return e ? _aim.copy(center(e)).sub(o).normalize() : _aim.copy(d);
+}
+const shotStats = { shots: 0, hits: 0 }; // accuracy counters (shown in the demo hook)
 function fire(a) {
   a.model.muzzle.getWorldPosition(_o);
   _d.set(0, 0, -1).transformDirection(a.controller.matrixWorld);
   // the whole mechanic: push opposite the barrel. On the ground, horizontal push is damped so you
   // don't skid while standing and shooting; vertical stays full so shooting the floor still launches you.
+  // Recoil always uses the real barrel direction, never the assisted one.
   const gk = grounded ? P.groundKick : 1;
   vel.x -= _d.x * P.kick * gk; vel.z -= _d.z * P.kick * gk; vel.y -= _d.y * P.kick;
 
+  const aim = aimDir(_o, _d, P.aimAssist);
   const sp = Math.tan(THREE.MathUtils.degToRad(P.spreadBase + P.spreadHeat * a.heat));
   _r.set(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1);
-  _s.copy(_d).addScaledVector(_r, sp).normalize();
-  ray.set(_o, _s); ray.far = 250;
-  const hit = ray.intersectObjects(rayList(), true)[0];
-  if (hit) {
-    _e.copy(hit.point); spawnSpark(hit.point);
-    if (hit.object.userData.enemy) damage(hit.object.userData.enemy, 1, _s);
-  } else _e.copy(_o).addScaledVector(_s, 250);
+  _s.copy(aim).addScaledVector(_r, sp).normalize();
+  const hit = castShot(_o, _s);
+  _e.copy(_o).addScaledVector(_s, hit.t);
+  if (hit.enemy || hit.wall) spawnSpark(_e);
+  shotStats.shots++; if (hit.enemy) { shotStats.hits++; damage(hit.enemy, 1, _s); }
   addTracer(_o, _e);
 
   a.flashT = 0.03;
@@ -1723,12 +1792,13 @@ function fireCharge(a, c) {
   a.model.muzzle.getWorldPosition(_o);
   _d.set(0, 0, -1).transformDirection(a.controller.matrixWorld);
   vel.addScaledVector(_d, -P.chargeKick * c);
-  ray.set(_o, _d); ray.far = 250;
-  const hit = ray.intersectObjects(rayList(), true)[0];
-  if (hit) _e.copy(hit.point); else _e.copy(_o).addScaledVector(_d, 250);
-  const direct = hit?.object.userData.enemy;
+  const aim = aimDir(_o, _d, P.aimAssist * 1.5).clone();
+  const shot = castShot(_o, aim);
+  const hit = shot.enemy || shot.wall;
+  _e.copy(_o).addScaledVector(aim, shot.t);
+  const direct = shot.enemy;
   blastKills = 0;
-  if (direct) damage(direct, P.blastDamage * c, _d, 'blast');
+  if (direct) damage(direct, P.blastDamage * c, aim, 'blast');
   const rad = P.blastRadius * (0.5 + 0.5 * c);
   if (hit) {
     for (const e of enemies) {
@@ -1801,6 +1871,7 @@ function frame(dt) {
   updateProjectiles(dt);
   updateArm(arms.left, dt);
   updateArm(arms.right, dt);
+  updateAimSight(arms.left); updateAimSight(arms.right);
   updateFx(dt);
   updateTraffic(dt);
   if (pendingDeath) { pendingDeath = false; die(); }
@@ -1826,7 +1897,7 @@ if (new URLSearchParams(location.search).has('demo')) {
     startWave: n => { game.wave = n - 1; game.state = 'breather'; game.t = 0.01; },
     setLocked: v => { locked = v; },
     look: (yaw, p) => { dolly.rotation.y = yaw; pitch = p; },
-    state: () => ({ pos: dolly.position.toArray(), yaw: dolly.rotation.y, pitch, vel: vel.toArray(), grounded, kills, hp, score: game.score, wave: game.wave,
+    state: () => ({ pos: dolly.position.toArray(), yaw: dolly.rotation.y, pitch, vel: vel.toArray(), grounded, kills, hp, score: game.score, wave: game.wave, shots: shotStats.shots, hits: shotStats.hits,
                     enemies: enemies.filter(e => e.alive).length,
                     heat: [arms.left.heat, arms.right.heat], over: [arms.left.overheated, arms.right.overheated] }),
     targets: () => { const eye = new THREE.Vector3(pos.x, pos.y + 1.6, pos.z);

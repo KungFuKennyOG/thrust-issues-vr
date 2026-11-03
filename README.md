@@ -30,6 +30,10 @@ Scoring: kills while airborne are worth 1.5x, killing several enemies with one b
 
 The wrist HUD (VR) and the bottom-right HUD (desktop) show speed, HP, kills, FPS, the worst frame time, and the enemy count.
 
+## Aiming
+
+Aiming a gun from your hand in VR is hard, so the game helps. If an enemy is within a 6° cone of where a barrel points, shots bend onto it. Recoil always follows the real barrel direction, so movement isn't affected. Enemy hitboxes are padded spheres, and each arm has a faint aim laser whose dot turns red when it's on a target. In a test with a bot that wobbles about ±4°, this took the hit rate from about 5% to about 61%. Assist cone, hitbox size, and the laser can all be changed on the tuning panel.
+
 ## Tuning
 
 Every movement, heat, and combat value can be changed live, and changes are saved per browser. "Reset defaults" restores the tuned values.
