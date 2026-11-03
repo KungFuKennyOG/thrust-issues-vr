@@ -1282,12 +1282,16 @@ casingPool.onBounce = () => { if (T - tinkT > 0.05) { tinkT = T; sfxTink(); } };
 // Two layers: a white-hot core and a wide orange glow; every 3rd round is a fatter tracer.
 const STREAK_N = 140;
 // a tracer = two crossed planes with soft edges (reads as a glowing beam from any angle, never as a block)
-const BEAM_TEX = (() => { const c = mkCanvas(32, 8), g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 32, 0);
-  gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.35, 'rgba(255,255,255,0.55)'); gr.addColorStop(0.5, 'rgba(255,255,255,1)');
-  gr.addColorStop(0.65, 'rgba(255,255,255,0.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 32, 8);
-  // fade toward the tail
+const BEAM_TEX = (() => { // soft across the width; bright at the head (top), fading out toward the tail (bottom)
+  const c = mkCanvas(32, 64), g = c.getContext('2d'), img = g.createImageData(32, 64);
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 32; x++) {
+    const ax = Math.max(0, 1 - Math.abs(x - 15.5) / 16), along = Math.pow(1 - y / 63, 1.4);
+    const i = (y * 32 + x) * 4; img.data[i] = img.data[i + 1] = img.data[i + 2] = 255; img.data[i + 3] = Math.round(255 * Math.pow(ax, 1.3) * (0.4 + 0.6 * along));
+  }
+  g.putImageData(img, 0, 0);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
 const beamGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2).translate(0, 0, -0.5); // lies in local XZ, runs along -Z
+{ const pa = beamGeo.attributes.position; for (let i = 0; i < pa.count; i++) if (pa.getZ(i) > -0.5) pa.setX(i, pa.getX(i) * 0.25); } // comet: taper the tail
 const _bx = new THREE.Vector3(), _by = new THREE.Vector3(), _bz = new THREE.Vector3(), _bc = new THREE.Vector3(), _bm = new THREE.Matrix4(), camP = new THREE.Vector3();
 const streakCore = new THREE.InstancedMesh(beamGeo,
   new THREE.MeshBasicMaterial({ map: BEAM_TEX, color: 0xffffff, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, side: THREE.DoubleSide }), STREAK_N);
@@ -1310,7 +1314,7 @@ function updateStreaks(dt) {
   streaks.forEach((s, i) => {
     if (!s.on) return;
     s.t += 110 * dt; // visual speed: slow enough to see; damage already landed
-    const head = Math.min(s.t, s.dist), tail = Math.min(s.dist, Math.max(Math.min(1.5, s.dist * 0.5), s.t - 6)); // starts 1.5 m out: no blinding wedge at the muzzle // the tail keeps going after the head lands
+    const head = Math.min(s.t, s.dist), tail = Math.min(s.dist, Math.max(0, s.t - 6)); // starts at the muzzle; the comet taper keeps it from blinding you // the tail keeps going after the head lands
     if (!s.hit && s.t >= s.dist) { // arrival: impact effects + sound
       s.hit = true; _cp.copy(s.o).addScaledVector(s.d, s.dist);
       if (s.enemy) impactEnemy(s.enemy, _cp, s.d); else if (s.wall) { impactWall(_cp, s.n, 1); addDecal(_cp, s.n); }
@@ -1325,8 +1329,8 @@ function updateStreaks(dt) {
     _bx.normalize(); _by.crossVectors(_bz, _bx);
     _dm.quaternion.setFromRotationMatrix(_bm.makeBasis(_bx, _by, _bz));
     const len = Math.max(0.001, head - tail);
-    _dm.scale.set(0.22 * s.fat, 0.22 * s.fat, len); _dm.updateMatrix(); streakCore.setMatrixAt(i, _dm.matrix);
-    _dm.scale.set(0.6 * s.fat, 0.6 * s.fat, len * 1.05); _dm.updateMatrix(); streakGlow.setMatrixAt(i, _dm.matrix);
+    _dm.scale.set(0.3 * s.fat, 0.3 * s.fat, len); _dm.updateMatrix(); streakCore.setMatrixAt(i, _dm.matrix);
+    _dm.scale.set(0.95 * s.fat, 0.95 * s.fat, len * 1.05); _dm.updateMatrix(); streakGlow.setMatrixAt(i, _dm.matrix);
     // glowing head: a hot billboard riding the front of the bullet (gone once it has landed)
     if (s.t < s.dist) { _dm.position.copy(s.o).addScaledVector(s.d, head); _dm.quaternion.copy(camQ); _dm.scale.setScalar(0.95 * s.fat); }
     else { _dm.position.set(0, -999, 0); _dm.scale.setScalar(0); }
@@ -2259,7 +2263,8 @@ function fire(a) {
   const hit = castShot(_o, _s);
   shotStats.shots++;
   if (hit.enemy) { shotStats.hits++; damage(hit.enemy, 1, _s); sfxHit(); }
-  spawnStreak(_o, _s, hit.t, hit.enemy, hit.wall, hit.n); // impact sparks/gibs/decal happen when the tracer arrives
+  spawnStreak(_o, _s, hit.t, hit.enemy, hit.wall, hit.n);
+  a.lastHitT = hit.t; // impact sparks/gibs/decal happen when the tracer arrives
 
   a.flashT = 0.045; a.kickV += 3.2; a.kickRoll = (Math.random() - 0.5) * 0.6;
   ejectCasing(a);
@@ -2369,7 +2374,9 @@ function updateArm(a, dt) {
     m.flash.material.color.setHex(a.big > 0 ? 0x9ae8ff : 0xffffff);
   }
   m.light.color.setHex(a.big > 0 ? 0x7ad8ff : 0xffb050);
-  m.light.intensity = a.flashT > 0 ? (a.big > 0 ? 60 : 12 + Math.random() * 7) * P.muzzleLight : Math.max(0, m.light.intensity - dt * 1200);
+  const nearT = a.lastHitT ?? 10, near = Math.min(1, (nearT / 4) ** 2); // point-blank at a wall: light pulls back and dims
+  m.light.position.z = -Math.min(1.4, Math.max(0.15, nearT * 0.4));
+  m.light.intensity = a.flashT > 0 ? (a.big > 0 ? 60 : 12 + Math.random() * 7) * P.muzzleLight * Math.max(0.08, near) : Math.max(0, m.light.intensity - dt * 1200);
   m.orb.visible = a.charge > 0;
   if (m.orb.visible) {
     const full = a.charge >= 1;
