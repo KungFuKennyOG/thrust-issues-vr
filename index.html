@@ -1281,12 +1281,20 @@ casingPool.onBounce = () => { if (T - tinkT > 0.05) { tinkT = T; sfxTink(); } };
 // Travelling tracer streaks: damage is instant, but the bullet you see flies there at 300 m/s.
 // Two layers: a white-hot core and a wide orange glow; every 3rd round is a fatter tracer.
 const STREAK_N = 140;
-const streakCore = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1).translate(0, 0, -0.5),
-  new THREE.MeshBasicMaterial({ color: 0xfff4d0, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }), STREAK_N);
-const streakGlow = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1).translate(0, 0, -0.5),
-  new THREE.MeshBasicMaterial({ color: 0xff7a20, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.55, depthWrite: false }), STREAK_N);
+// a tracer = two crossed planes with soft edges (reads as a glowing beam from any angle, never as a block)
+const BEAM_TEX = (() => { const c = mkCanvas(32, 8), g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 32, 0);
+  gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.35, 'rgba(255,255,255,0.55)'); gr.addColorStop(0.5, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.65, 'rgba(255,255,255,0.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 32, 8);
+  // fade toward the tail
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+const beamGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2).translate(0, 0, -0.5); // lies in local XZ, runs along -Z
+const _bx = new THREE.Vector3(), _by = new THREE.Vector3(), _bz = new THREE.Vector3(), _bc = new THREE.Vector3(), _bm = new THREE.Matrix4(), camP = new THREE.Vector3();
+const streakCore = new THREE.InstancedMesh(beamGeo,
+  new THREE.MeshBasicMaterial({ map: BEAM_TEX, color: 0xffffff, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, side: THREE.DoubleSide }), STREAK_N);
+const streakGlow = new THREE.InstancedMesh(beamGeo,
+  new THREE.MeshBasicMaterial({ map: BEAM_TEX, color: 0xffa040, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, side: THREE.DoubleSide }), STREAK_N);
 const streakHead = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1),
-  new THREE.MeshBasicMaterial({ map: SOFT_TEX, color: 0xffc070, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }), STREAK_N);
+  new THREE.MeshBasicMaterial({ map: SOFT_TEX, color: 0xffe0a0, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }), STREAK_N);
 for (const m of [streakCore, streakGlow, streakHead]) { m.frustumCulled = false; scene.add(m); }
 const streaks = Array.from({ length: STREAK_N }, () => ({ on: false, o: new THREE.Vector3(), d: new THREE.Vector3(), n: new THREE.Vector3(),
   dist: 0, t: 0, hit: false, enemy: null, wall: false, fat: 1 }));
@@ -1301,21 +1309,26 @@ function spawnStreak(o, d, dist, enemy, wall, normal) {
 function updateStreaks(dt) {
   streaks.forEach((s, i) => {
     if (!s.on) return;
-    s.t += 140 * dt; // visual speed: slow enough to see; damage already landed
-    const head = Math.min(s.t, s.dist), tail = Math.max(0, head - 3.5);
+    s.t += 110 * dt; // visual speed: slow enough to see; damage already landed
+    const head = Math.min(s.t, s.dist), tail = Math.min(s.dist, Math.max(Math.min(1.5, s.dist * 0.5), s.t - 6)); // starts 1.5 m out: no blinding wedge at the muzzle // the tail keeps going after the head lands
     if (!s.hit && s.t >= s.dist) { // arrival: impact effects + sound
       s.hit = true; _cp.copy(s.o).addScaledVector(s.d, s.dist);
       if (s.enemy) impactEnemy(s.enemy, _cp, s.d); else if (s.wall) { impactWall(_cp, s.n, 1); addDecal(_cp, s.n); }
       sfxImpact(!!s.enemy, s.dist);
     }
     if (tail >= s.dist) { s.on = false; _dm.position.set(0, -999, 0); _dm.scale.setScalar(0); _dm.updateMatrix(); streakCore.setMatrixAt(i, _dm.matrix); streakGlow.setMatrixAt(i, _dm.matrix); streakHead.setMatrixAt(i, _dm.matrix); return; }
-    _dm.position.copy(s.o).addScaledVector(s.d, head);
-    _dm.quaternion.setFromUnitVectors(NEG_Z, s.d);
-    const len = Math.max(0.01, head - tail);
-    _dm.scale.set(0.06 * s.fat, 0.06 * s.fat, len); _dm.updateMatrix(); streakCore.setMatrixAt(i, _dm.matrix);
-    _dm.scale.set(0.28 * s.fat, 0.28 * s.fat, len * 1.05); _dm.updateMatrix(); streakGlow.setMatrixAt(i, _dm.matrix);
+    // the streak box runs forward from its origin, so anchor it at the tail and let it reach the head
+    _dm.position.copy(s.o).addScaledVector(s.d, tail);
+    // axial billboard: the beam keeps its direction but rolls to face the camera, so it always shows its full width
+    _bz.copy(s.d).negate(); _bc.copy(camP).sub(_dm.position); _bx.crossVectors(s.d, _bc);
+    if (_bx.lengthSq() < 1e-6) _bx.set(1, 0, 0).cross(s.d);
+    _bx.normalize(); _by.crossVectors(_bz, _bx);
+    _dm.quaternion.setFromRotationMatrix(_bm.makeBasis(_bx, _by, _bz));
+    const len = Math.max(0.001, head - tail);
+    _dm.scale.set(0.22 * s.fat, 0.22 * s.fat, len); _dm.updateMatrix(); streakCore.setMatrixAt(i, _dm.matrix);
+    _dm.scale.set(0.6 * s.fat, 0.6 * s.fat, len * 1.05); _dm.updateMatrix(); streakGlow.setMatrixAt(i, _dm.matrix);
     // glowing head: a hot billboard riding the front of the bullet (gone once it has landed)
-    if (s.t < s.dist) { _dm.quaternion.copy(camQ); _dm.scale.setScalar(0.55 * s.fat); }
+    if (s.t < s.dist) { _dm.position.copy(s.o).addScaledVector(s.d, head); _dm.quaternion.copy(camQ); _dm.scale.setScalar(0.95 * s.fat); }
     else { _dm.position.set(0, -999, 0); _dm.scale.setScalar(0); }
     _dm.updateMatrix(); streakHead.setMatrixAt(i, _dm.matrix);
   });
@@ -1375,7 +1388,7 @@ function ejectCasing(a) {
   emit(casingPool, _cp, _cv, 1.6, 1, undefined, { grav: 9.8, bounce: 0.35 });
 }
 function updateGunFx(dt) {
-  camera.getWorldQuaternion(camQ);
+  camera.getWorldQuaternion(camQ); camera.getWorldPosition(camP);
   updateStreaks(dt);
   updatePool(sparkPool, dt, 'vel'); updatePool(gibPool, dt, 'spin'); updatePool(casingPool, dt, 'spin'); updatePool(smokePool, dt, 'billboard');
 }
