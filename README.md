@@ -4,10 +4,19 @@ A VR boomer shooter where your guns are your jetpack. Your arms are machine-gun 
 
 **Play:** https://kungfukennyog.github.io/thrust-issues-vr/
 
+## Weapons
+
+Each arm switches on its own. All three weapons share that arm's heat, which is also your thrust budget, and each one moves you differently.
+
+- **Minigun:** steady thrust, good for hovering and steering. Full damage against everything except heavy armor.
+- **Shotgun:** 10 pellets and one big shove. Point it at the floor for a burst jump, or behind you for a dash. Brutal up close, but weak against heavy armor.
+- **Rockets:** slow, visible rockets with smoke trails and a 4.5 m blast that cracks heavy armor. The blast throws you if you're close, which is how you rocket jump, and costs a little health. Push strength and self-damage are on the tuning panel.
+
 ## How to play
 
 Survive waves of enemies. Clearing a wave gives bonus points and heals 30 HP, followed by a short breather before the next one. Your best score is saved.
 
+- **Cleaning bots** (청소 = cleaning) are fodder. They rush you in packs, leap across the gaps between roofs after you, and pop when they touch you.
 - **Flyers** chase you and ram you.
 - **Grunts** walk toward you and fire slow orbs you can dodge. Their visor flashes right before they shoot.
 - **Snipers** (wave 2+) sit on the high ledges. They aim a red laser at you, the laser turns white when they lock on, and then they fire. Move off the line.
@@ -21,6 +30,7 @@ Scoring: kills while airborne are worth 1.5x, killing several enemies with one b
 |---|---|---|
 | Fire left / right arm | Trigger | LMB / RMB |
 | Charge shot (hold, release to blast) | Grip | Q / E |
+| Switch weapon (per arm) | Click thumbstick | 1/2/3 both arms · Z / C cycle left / right · mouse wheel |
 | Move | Left stick | WASD |
 | Turn | Right stick | Mouse |
 | Jump | A | Space |
